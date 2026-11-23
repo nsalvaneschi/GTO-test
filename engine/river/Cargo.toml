@@ -5,3 +5,4 @@ edition = "2021"
 
 [dependencies]
 gto-core = { path = "../core" }
+rayon = "1.12.0"
