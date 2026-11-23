@@ -57,6 +57,38 @@ fn iso_matches_unabridged() {
 }
 
 #[test]
+fn iso_asymmetric_ranges_exact() {
+    let b = "Ks Kh 7d 7c";
+    let r = [rnd_range(3), rnd_range(4)];
+    let a = run(&cfg(b, r.clone(), true, false), 150);
+    let f = run(&cfg(b, r.clone(), false, false), 150);
+    println!("asym iso {a:.4} vs full {f:.4}");
+    assert!((a - f).abs() < 0.15);
+}
+
+#[test]
+fn iso_partial_symmetry() {
+    let b = "Ks Kh 7d 7c";
+    let bc = parse_cards(b);
+    let (s0, s1) = (bc[0] & 3, bc[1] & 3);
+    let sw = |c: u8| if c & 3 == s0 { (c & !3) | s1 } else if c & 3 == s1 { (c & !3) | s0 } else { c };
+    let cb = combos();
+    let idx = |a: u8, b: u8| cb.iter().position(|&(x, y)| (x, y) == (a, b) || (x, y) == (b, a)).unwrap();
+    // Symmetrize random ranges under the single swap s0<->s1 only.
+    let mk = |seed: u64| {
+        let x = rnd_range(seed);
+        cb.iter().enumerate().map(|(i, &(p, q))| (x[i] + x[idx(sw(p), sw(q))]) / 2.0).collect::<Vec<f32>>()
+    };
+    let r = [mk(5), mk(6)];
+    let a = run(&cfg(b, r.clone(), true, false), 150);
+    let f = run(&cfg(b, r.clone(), false, false), 150);
+    let (mi, mf) = (estimate_memory(&cfg(b, r.clone(), true, false), u64::MAX).unwrap(),
+        estimate_memory(&cfg(b, r, false, false), u64::MAX).unwrap());
+    println!("partial iso {a:.4} vs full {f:.4}; mem {mi} vs {mf}");
+    assert!((a - f).abs() < 0.15 && mi < mf);
+}
+
+#[test]
 fn memory_estimate() {
     let c = cfg("As Kd 7c 4h", [rnd_range(1), rnd_range(2)], false, false);
     let m = estimate_memory(&c, u64::MAX).unwrap();

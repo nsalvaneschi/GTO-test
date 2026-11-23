@@ -16,7 +16,7 @@ pub struct StreetConfig {
     pub ranges: [Vec<f32>; 2],
     /// One betting config per remaining street (`6 - board.len()`); pot/stack of [0] are the start values.
     pub streets: Vec<TreeConfig>,
-    /// Suit isomorphism (only applied where board and ranges are symmetric).
+    /// Suit isomorphism: merges only under suit perms that fix the board and both ranges.
     pub iso: bool,
     /// i16 storage with per-node f32 scale.
     pub compress: bool,
