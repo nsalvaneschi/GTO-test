@@ -20,3 +20,10 @@ Escalate only on failure or genuine design ambiguity; de-escalate once the desig
 - `engine/`  solver core (game tree, CFR, equity, abstractions) + tests
 - `web/`     frontend (range grid, strategy viewer, drills)
 - `docs/`    design notes written by `architect`
+
+## Localisation (requirement)
+- App languages: English (default), Spanish (es), Italian (it).
+- Engine/CLI/WASM stay language-neutral: return codes, numbers and card/action ids only, never display text.
+- All UI strings live in `web/src/i18n/{en,es,it}.json` (same keys in all three); no hardcoded text in components.
+- Use ICU-style plurals and locale number formatting (`Intl`). Keep poker terms in a shared glossary (`docs/glossary.md`) so es/it terminology stays consistent (e.g. fold/call/raise, pot, range, equity).
+- Add a test that fails if any key is missing from a locale.
