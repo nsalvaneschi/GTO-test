@@ -34,13 +34,13 @@ impl Params {
     pub fn cfr_plus() -> Self {
         Params { alpha: f64::INFINITY, beta: f64::NEG_INFINITY, gamma: 2.0 }
     }
-    fn pos(&self, t: f64) -> f64 {
+    pub fn pos(&self, t: f64) -> f64 {
         if self.alpha.is_infinite() { 1.0 } else { let a = t.powf(self.alpha); a / (a + 1.0) }
     }
-    fn neg(&self, t: f64) -> f64 {
+    pub fn neg(&self, t: f64) -> f64 {
         if self.beta == f64::NEG_INFINITY { 0.0 } else { let b = t.powf(self.beta); b / (b + 1.0) }
     }
-    fn avg(&self, t: f64) -> f64 {
+    pub fn avg(&self, t: f64) -> f64 {
         (t / (t + 1.0)).powf(self.gamma)
     }
 }

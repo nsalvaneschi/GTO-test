@@ -12,3 +12,10 @@ version = "0.1.0"
 dependencies = [
  "gto-core",
 ]
+
+[[package]]
+name = "gto-river"
+version = "0.1.0"
+dependencies = [
+ "gto-core",
+]
