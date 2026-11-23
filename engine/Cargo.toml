@@ -1,3 +1,3 @@
 [workspace]
 resolver = "2"
-members = ["core", "games", "river"]
+members = ["core", "games", "river", "wasm", "cli"]

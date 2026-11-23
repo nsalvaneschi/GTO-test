@@ -3,3 +3,6 @@ pub mod cards;
 pub mod solver;
 pub mod tree;
 pub mod street;
+#[cfg(not(feature = "rayon"))]
+pub mod seq;
+pub mod api;

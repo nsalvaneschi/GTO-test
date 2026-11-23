@@ -5,4 +5,10 @@ edition = "2021"
 
 [dependencies]
 gto-core = { path = "../core" }
-rayon = "1.12.0"
+rayon = { version = "1.12.0", optional = true }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[features]
+default = ["rayon"]
+rayon = ["dep:rayon"]

@@ -1,0 +1,12 @@
+[package]
+name = "gto-cli"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "gto"
+path = "src/main.rs"
+
+[dependencies]
+gto-river = { path = "../river" }
+serde_json = "1"

@@ -3,7 +3,10 @@
 use crate::cards::{combos, eval7};
 use crate::tree::{TreeConfig, H};
 use gto_core::Params;
+#[cfg(feature = "rayon")]
 use rayon::prelude::*;
+#[cfg(not(feature = "rayon"))]
+use crate::seq::*;
 use std::cell::UnsafeCell;
 
 #[derive(Clone)]
@@ -557,7 +560,7 @@ impl StreetSolver {
 
     /// Best response value per hand against the average strategy. Evaluates every dealt card
     /// (not just canonical ones), mapping reach through the suit perms.
-    fn br(&self, id: usize, p: usize, opp: &[f32]) -> Vec<f32> {
+    fn br(&self, id: usize, p: usize, opp: &[f32], best: bool) -> Vec<f32> {
         let nd = &self.nodes[id];
         match nd.kind {
             K::Fold | K::Showdown => return self.terminal(nd, p, opp),
@@ -569,7 +572,7 @@ impl StreetSolver {
                     let m = &self.hmap[pm as usize];
                     let oppk = self.mask(opp, ck);
                     let oppc: Vec<f32> = (0..H).map(|h| oppk[m[h] as usize]).collect();
-                    self.mask(&self.br(o.child as usize, p, &oppc), o.card)
+                    self.mask(&self.br(o.child as usize, p, &oppc, best), o.card)
                 }).collect();
                 let mut v = vec![0.0f32; H];
                 for (&(_, _, pm), cv) in items.iter().zip(&res) {
@@ -587,16 +590,18 @@ impl StreetSolver {
         let kids = &self.children[nd.child_off as usize..nd.child_off as usize + n];
         let cvs: Vec<Vec<f32>> = (0..n).into_par_iter().map(|a| {
             if q == p {
-                self.br(kids[a] as usize, p, opp)
+                self.br(kids[a] as usize, p, opp, best)
             } else {
                 let opp2: Vec<f32> = (0..H).map(|h| opp[h] * strat[a * H + h]).collect();
-                self.br(kids[a] as usize, p, &opp2)
+                self.br(kids[a] as usize, p, &opp2, best)
             }
         }).collect();
-        let mut v = vec![if q == p { f32::NEG_INFINITY } else { 0.0 }; H];
-        for cv in &cvs {
+        let mut v = vec![if q == p && best { f32::NEG_INFINITY } else { 0.0 }; H];
+        for (a, cv) in cvs.iter().enumerate() {
             for h in 0..H {
-                if q == p { v[h] = v[h].max(cv[h]) } else { v[h] += cv[h] }
+                if q == p && best { v[h] = v[h].max(cv[h]) }
+                else if q == p { v[h] += strat[a * H + h] * cv[h] }
+                else { v[h] += cv[h] }
             }
         }
         v
@@ -605,9 +610,74 @@ impl StreetSolver {
     pub fn exploitability_pct(&self) -> f32 {
         let mut tot = 0.0f64;
         for p in 0..2 {
-            let v = self.br(self.root as usize, p, &self.w[1 - p]);
+            let v = self.br(self.root as usize, p, &self.w[1 - p], true);
             tot += (0..H).filter(|&h| self.w[p][h] > 0.0).map(|h| (self.w[p][h] * v[h]) as f64).sum::<f64>();
         }
         (100.0 * tot / 2.0 / self.norm as f64 / self.pot as f64) as f32
     }
+
+    /// Average-strategy view of the node reached by `path`: an action index at Action nodes,
+    /// a (canonical) card at Chance nodes. `ev` is the acting player's per-combo value in raw
+    /// chips under the average strategy, weighted by the opponent's reach (not renormalized).
+    pub fn query(&self, path: &[u32]) -> Result<NodeView, String> {
+        let mut id = self.root as usize;
+        let mut reach = self.w.clone();
+        for &x in path {
+            let nd = &self.nodes[id];
+            match nd.kind {
+                K::Action => {
+                    let n = nd.n as usize;
+                    if x as usize >= n {
+                        return Err(format!("action {x} out of range (node has {n})"));
+                    }
+                    let mut s = vec![0.0f32; n * H];
+                    self.sum.load(nd.data_off, id, &mut s);
+                    let strat = normalize(&s, n);
+                    let q = nd.player as usize;
+                    for h in 0..H {
+                        reach[q][h] *= strat[x as usize * H + h];
+                    }
+                    id = self.children[nd.child_off as usize + x as usize] as usize;
+                }
+                K::Chance => {
+                    let o = self.chances[nd.aux as usize].iter().find(|o| o.card as u32 == x)
+                        .ok_or_else(|| format!("card {x} is not a canonical chance card here"))?;
+                    for r in reach.iter_mut() {
+                        *r = self.mask(r, o.card);
+                    }
+                    id = o.child as usize;
+                }
+                _ => return Err("path goes past a terminal node".into()),
+            }
+        }
+        let nd = &self.nodes[id];
+        Ok(match nd.kind {
+            K::Action => {
+                let n = nd.n as usize;
+                let mut s = vec![0.0f32; n * H];
+                self.sum.load(nd.data_off, id, &mut s);
+                let q = nd.player as usize;
+                NodeView { kind: "action".to_string(), player: nd.player, n, cards: vec![], strategy: normalize(&s, n),
+                    ev: self.br(id, q, &reach[1 - q], false), range: reach[q].clone() }
+            }
+            K::Chance => NodeView { kind: "chance".to_string(), player: 0, n: 0,
+                cards: self.chances[nd.aux as usize].iter().map(|o| o.card).collect(),
+                strategy: vec![], ev: vec![], range: vec![] },
+            K::Fold => NodeView { kind: "fold".to_string(), player: nd.player, n: 0, cards: vec![], strategy: vec![], ev: vec![], range: vec![] },
+            K::Showdown => NodeView { kind: "showdown".to_string(), player: 0, n: 0, cards: vec![], strategy: vec![], ev: vec![], range: vec![] },
+        })
+    }
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct NodeView {
+    pub kind: String,
+    pub player: u8,
+    pub n: usize,
+    pub cards: Vec<u8>,
+    /// n * H, action-major.
+    pub strategy: Vec<f32>,
+    pub ev: Vec<f32>,
+    /// Acting player's reach per combo.
+    pub range: Vec<f32>,
 }
