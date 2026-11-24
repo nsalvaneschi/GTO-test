@@ -2,6 +2,8 @@ import { createServer } from 'node:http';
 import { randomBytes, scrypt, timingSafeEqual, createHash } from 'node:crypto';
 import { readFile, stat } from 'node:fs/promises';
 import { join, normalize, extname, sep, resolve } from 'node:path';
+import { gzip, brotliCompress, constants as zlibConstants } from 'node:zlib';
+import { promisify } from 'node:util';
 import { summarize } from './stats.js';
 
 const SESSION_MS = 30 * 86400000;
@@ -10,6 +12,10 @@ const COOKIE = 'sid';
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css',
   '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon',
   '.wasm': 'application/wasm', '.txt': 'text/plain', '.woff2': 'font/woff2', '.map': 'application/json' };
+
+const COMPRESSIBLE = new Set(['.html', '.js', '.mjs', '.css', '.json', '.svg', '.wasm', '.txt', '.map']);
+const MIN_COMPRESS = 1024;
+const gzipAsync = promisify(gzip), brotliAsync = promisify(brotliCompress);
 
 // Vite app: module scripts + module workers from self, WASM compile, inline <style>/style="" used by the UI.
 const CSP = "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; style-src 'self' 'unsafe-inline'; " +
@@ -471,12 +477,43 @@ export function createApp({ db, webDist, now = Date.now, rateLimit = { max: 10, 
       file = join(webDist, 'index.html'); // SPA fallback
     }
     try {
-      const data = await readFile(file);
-      res.writeHead(200, { 'content-type': MIME[extname(file)] ?? 'application/octet-stream', 'x-content-type-options': 'nosniff',
-        'content-security-policy': CSP, 'referrer-policy': 'same-origin', 'x-frame-options': 'DENY' });
-      res.end(req.method === 'HEAD' ? undefined : data);
+      const ext = extname(file);
+      const st = await stat(file);
+      const key = `${file}|${st.mtimeMs}|${st.size}`;
+      let ent = fileCache.get(key);
+      if (!ent) {
+        const data = await readFile(file);
+        ent = { data, etag: createHash('sha1').update(data).digest('base64url'), enc: new Map() };
+        for (const k of fileCache.keys()) if (k.startsWith(file + '|')) fileCache.delete(k); // drop stale mtime entries
+        fileCache.set(key, ent);
+      }
+      // Pick an encoding (compress once per file version, cached in memory).
+      const ae = String(req.headers['accept-encoding'] ?? '');
+      const accepts = (c) => new RegExp(`(^|[\\s,])${c}\\s*(;(?!\\s*q=0(\\.0*)?\\s*(,|$))[^,]*)?(,|$)`, 'i').test(ae);
+      const choice = COMPRESSIBLE.has(ext) && ent.data.length >= MIN_COMPRESS ? (accepts('br') ? 'br' : accepts('gzip') ? 'gzip' : null) : null;
+      let body = ent.data;
+      if (choice) {
+        if (!ent.enc.has(choice)) ent.enc.set(choice, choice === 'br'
+          ? brotliAsync(ent.data, { params: { [zlibConstants.BROTLI_PARAM_QUALITY]: 5, [zlibConstants.BROTLI_PARAM_SIZE_HINT]: ent.data.length } })
+          : gzipAsync(ent.data, { level: 6 }));
+        body = await ent.enc.get(choice);
+      }
+      const etag = `"${ent.etag}${choice ? '-' + choice : ''}"`;
+      const headers = { 'content-type': MIME[ext] ?? 'application/octet-stream', 'x-content-type-options': 'nosniff',
+        'content-security-policy': CSP, 'referrer-policy': 'same-origin', 'x-frame-options': 'DENY',
+        'cache-control': rel.startsWith(sep + 'assets' + sep) && file !== join(webDist, 'index.html') ? 'public, max-age=31536000, immutable' : 'no-cache',
+        etag, 'last-modified': st.mtime.toUTCString(), 'accept-ranges': 'none', // Range is ignored: always the full 200 body
+        ...(COMPRESSIBLE.has(ext) ? { vary: 'Accept-Encoding' } : {}), ...(choice ? { 'content-encoding': choice === 'br' ? 'br' : 'gzip' } : {}) };
+      const inm = req.headers['if-none-match'];
+      const fresh = inm !== undefined
+        ? inm.trim() === '*' || inm.split(',').some((t) => t.trim().replace(/^W\//, '') === etag)
+        : req.headers['if-modified-since'] !== undefined && Math.floor(st.mtimeMs / 1000) <= Math.floor(Date.parse(req.headers['if-modified-since']) / 1000);
+      if (fresh) { res.writeHead(304, headers); return res.end(); }
+      res.writeHead(200, { ...headers, 'content-length': body.length });
+      res.end(req.method === 'HEAD' ? undefined : body);
     } catch { send(res, 404, { error: 'not_found' }); }
   }
+  const fileCache = new Map();
 
   const server = createServer(async (req, res) => {
     try {

@@ -22,3 +22,6 @@ Streak = consecutive UTC days with >= 1 answer ending today (or yesterday). Spot
 4. Variables: nothing secret is required. `PORT` is injected by Railway. Optional: `WEB_DIST`, `DB_PATH`, `TRUST_PROXY` (`1`/`0`). Static responses carry a CSP (`script-src 'self' 'wasm-unsafe-eval'`, `worker-src 'self'`, inline styles allowed), nosniff, X-Frame-Options DENY.
 5. Settings > Networking > Generate Domain (HTTPS; Railway terminates TLS; the server trusts `x-forwarded-proto`/`x-forwarded-for` only when `TRUST_PROXY=1`, which is the default when `RAILWAY_ENVIRONMENT` is set, else off, so the cookie is `Secure` and the rate limiter sees the real client IP). Healthcheck: `/api/health`.
 Use a single replica (SQLite + in-memory rate limiter).
+
+## Static delivery
+Text-like files (html, js, css, json, svg, wasm, txt, map; >= 1 KB) are served brotli (q5) or gzip per `Accept-Encoding`, compressed once per file version (path+mtime+size) and cached in memory; `Vary: Accept-Encoding`, exact `Content-Length`, HEAD parity. `/assets/*` (Vite content-hashed): `public, max-age=31536000, immutable`. Everything else (index.html, SPA fallback): `no-cache` with ETag (per encoding) and Last-Modified; `If-None-Match`/`If-Modified-Since` give 304 (CSP etc. kept). `Range` is ignored (full 200, `Accept-Ranges: none`). API responses: `no-store`.
