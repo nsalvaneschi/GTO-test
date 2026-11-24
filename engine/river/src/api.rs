@@ -36,6 +36,9 @@ pub struct JsonConfig {
     pub iso: bool,
     #[serde(default)]
     pub compress: bool,
+    /// Opt-in equity bucketing (max buckets per board); see `bucket`.
+    #[serde(default)]
+    pub buckets: Option<usize>,
     /// Memory budget in MiB (default 4096).
     pub budget_mb: Option<u64>,
 }
@@ -80,7 +83,7 @@ impl JsonConfig {
         let streets = self.streets.iter()
             .map(|s| TreeConfig { pot: s.pot, stack: s.stack, sizes: s.sizes.clone(), raise_cap: s.raise_cap })
             .collect();
-        Ok(StreetConfig { board, ranges, streets, iso: self.iso, compress: self.compress })
+        Ok(StreetConfig { board, ranges, streets, iso: self.iso, compress: self.compress, buckets: self.buckets })
     }
 }
 

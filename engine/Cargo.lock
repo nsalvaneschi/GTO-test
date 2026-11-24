@@ -46,9 +46,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0e9c71c2167ca323c882b99918929403426e2373ea17242ff5653e0d5e1058be"
 
 [[package]]
+name = "gto-abstraction"
+version = "0.1.0"
+dependencies = [
+ "gto-core",
+ "gto-river",
+ "rayon",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "gto-cli"
 version = "0.1.0"
 dependencies = [
+ "gto-abstraction",
  "gto-river",
  "serde_json",
 ]

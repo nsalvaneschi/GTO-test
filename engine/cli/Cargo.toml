@@ -9,4 +9,5 @@ path = "src/main.rs"
 
 [dependencies]
 gto-river = { path = "../river" }
+gto-abstraction = { path = "../abstraction" }
 serde_json = "1"

@@ -20,6 +20,16 @@ pub struct StreetConfig {
     pub iso: bool,
     /// i16 storage with per-node f32 scale.
     pub compress: bool,
+    /// Opt-in lossy abstraction: at most this many equity buckets per board (see `bucket`).
+    /// Hands of one bucket share a strategy at every action node of that street.
+    pub buckets: Option<usize>,
+}
+
+const NOB: u32 = u32::MAX;
+
+struct BMap {
+    map: Vec<u16>,
+    k: usize,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -38,7 +48,7 @@ struct N {
     child_off: u32,
     n: u32,
     data_off: usize,
-    /// Showdown: board id. Chance: chance id.
+    /// Showdown: board id. Chance: chance id. Action: bucket map id (`NOB` = none).
     aux: u32,
 }
 
@@ -85,6 +95,8 @@ struct Builder<'a> {
     children: Vec<u32>,
     chances: Vec<Vec<Orbit>>,
     boards: Vec<Board>,
+    bmaps: Vec<BMap>,
+    bcache: std::collections::HashMap<u64, u32>,
     data_len: usize,
     n_nodes: usize,
     n_action: usize,
@@ -97,13 +109,15 @@ struct Ctx {
     pot: f32,
     stack: f32,
     bid: u32,
+    bm: u32,
 }
 
 impl<'a> Builder<'a> {
     fn push(&mut self, kind: K, player: u8, pay: f32, ch: Vec<u32>, aux: u32) -> u32 {
         self.n_nodes += 1;
+        let w = if kind != K::Action || aux == NOB { H } else if self.dry { self.cfg.buckets.unwrap() } else { self.bmaps[aux as usize].k };
         if kind == K::Action {
-            self.data_len += ch.len() * H;
+            self.data_len += ch.len() * w;
             self.n_action += 1;
         }
         if self.dry {
@@ -112,7 +126,7 @@ impl<'a> Builder<'a> {
         let child_off = self.children.len() as u32;
         let n = ch.len() as u32;
         self.children.extend(ch);
-        let data_off = if kind == K::Action { self.data_len - n as usize * H } else { 0 };
+        let data_off = if kind == K::Action { self.data_len - n as usize * w } else { 0 };
         self.nodes.push(N { kind, player, pay, child_off, n, data_off, aux });
         (self.nodes.len() - 1) as u32
     }
@@ -140,7 +154,24 @@ impl<'a> Builder<'a> {
                 bid = (self.boards.len() - 1) as u32;
             }
         }
-        let ctx = Ctx { board: board.to_vec(), s, pot, stack, bid };
+        let mut bm = NOB;
+        if let Some(k) = self.cfg.buckets {
+            bm = 0;
+            if !self.dry {
+                let key = board.iter().fold(0u64, |m, &b| m | 1 << b);
+                bm = match self.bcache.get(&key) {
+                    Some(&i) => i,
+                    None => {
+                        let map = crate::bucket::bucket_board(board, k);
+                        let kk = map.iter().filter(|&&x| x != crate::bucket::NONE).map(|&x| x as usize + 1).max().unwrap_or(1);
+                        self.bmaps.push(BMap { map, k: kk });
+                        self.bcache.insert(key, self.bmaps.len() as u32 - 1);
+                        self.bmaps.len() as u32 - 1
+                    }
+                };
+            }
+        }
+        let ctx = Ctx { board: board.to_vec(), s, pot, stack, bid, bm };
         self.go(&ctx, [0.0, 0.0], 0, 0)
     }
 
@@ -225,7 +256,7 @@ impl<'a> Builder<'a> {
                 ch.push(self.go(ctx, nc, o, aggr + 1));
             }
         }
-        self.push(K::Action, me as u8, 0.0, ch, 0)
+        self.push(K::Action, me as u8, 0.0, ch, ctx.bm)
     }
 }
 
@@ -250,7 +281,7 @@ fn make<'a>(cfg: &'a StreetConfig, dry: bool, cb: &'a [(u8, u8)], ps: &'a [[u8; 
     }).collect();
     Builder {
         cfg, dry, combos: cb, hmap: hm, perms: ps, range_ok, nodes: vec![], children: vec![], chances: vec![],
-        boards: vec![], data_len: 0, n_nodes: 0, n_action: 0, n_boards: 0,
+        boards: vec![], bmaps: vec![], bcache: Default::default(), data_len: 0, n_nodes: 0, n_action: 0, n_boards: 0,
     }
 }
 
@@ -328,6 +359,7 @@ pub struct StreetSolver {
     children: Vec<u32>,
     chances: Vec<Vec<Orbit>>,
     boards: Vec<Board>,
+    bmaps: Vec<BMap>,
     root: u32,
     combos: Vec<(u8, u8)>,
     hmap: Vec<Vec<u16>>,
@@ -340,23 +372,23 @@ pub struct StreetSolver {
     pub iters: u32,
 }
 
-fn regret_match(r: &[f32], n: usize) -> Vec<f32> {
-    let mut out = vec![0.0f32; n * H];
-    for h in 0..H {
-        let tot: f32 = (0..n).map(|a| r[a * H + h].max(0.0)).sum();
+fn regret_match(r: &[f32], n: usize, w: usize) -> Vec<f32> {
+    let mut out = vec![0.0f32; n * w];
+    for h in 0..w {
+        let tot: f32 = (0..n).map(|a| r[a * w + h].max(0.0)).sum();
         for a in 0..n {
-            out[a * H + h] = if tot > 0.0 { r[a * H + h].max(0.0) / tot } else { 1.0 / n as f32 };
+            out[a * w + h] = if tot > 0.0 { r[a * w + h].max(0.0) / tot } else { 1.0 / n as f32 };
         }
     }
     out
 }
 
-fn normalize(s: &[f32], n: usize) -> Vec<f32> {
-    let mut out = vec![0.0f32; n * H];
-    for h in 0..H {
-        let tot: f32 = (0..n).map(|a| s[a * H + h]).sum();
+fn normalize(s: &[f32], n: usize, w: usize) -> Vec<f32> {
+    let mut out = vec![0.0f32; n * w];
+    for h in 0..w {
+        let tot: f32 = (0..n).map(|a| s[a * w + h]).sum();
         for a in 0..n {
-            out[a * H + h] = if tot > 0.0 { s[a * H + h] / tot } else { 1.0 / n as f32 };
+            out[a * w + h] = if tot > 0.0 { s[a * w + h] / tot } else { 1.0 / n as f32 };
         }
     }
     out
@@ -369,6 +401,7 @@ impl StreetSolver {
         let mut b = make(cfg, false, &cb, &ps, &hm);
         let root = run_build(&mut b);
         let (nodes, children, chances, boards, data_len) = (b.nodes, b.children, b.chances, b.boards, b.data_len);
+        let bmaps = b.bmaps;
         let mut w = [cfg.ranges[0].clone(), cfg.ranges[1].clone()];
         for (i, &(a, c)) in cb.iter().enumerate() {
             if cfg.board.contains(&a) || cfg.board.contains(&c) {
@@ -378,7 +411,7 @@ impl StreetSolver {
         }
         let n_nodes = nodes.len();
         let mut s = StreetSolver {
-            nodes, children, chances, boards, root, combos: cb, hmap: hm, w, norm: 1.0, pot: cfg.streets[0].pot,
+            nodes, children, chances, boards, bmaps, root, combos: cb, hmap: hm, w, norm: 1.0, pot: cfg.streets[0].pot,
             regret: Arr::new(data_len, n_nodes, cfg.compress), sum: Arr::new(data_len, n_nodes, cfg.compress),
             params: Params::dcfr(), iters: 0,
         };
@@ -405,6 +438,25 @@ impl StreetSolver {
         }
         (0..52u8).filter(|&c| dead >> c & 1 == 0).collect::<Vec<_>>().par_iter()
             .map(|&c| self.norm_rec(dead | 1 << c, left - 1)).sum()
+    }
+
+    fn bmap(&self, nd: &N) -> Option<&BMap> {
+        if nd.aux == NOB { None } else { Some(&self.bmaps[nd.aux as usize]) }
+    }
+
+    /// Per-hand strategy (n*H, action-major) from a per-slot (hand or bucket) strategy.
+    fn expand(&self, nd: &N, sb: Vec<f32>) -> Vec<f32> {
+        let Some(bm) = self.bmap(nd) else { return sb };
+        let n = nd.n as usize;
+        let mut out = vec![1.0 / n as f32; n * H];
+        for h in 0..H {
+            if bm.map[h] != crate::bucket::NONE {
+                for a in 0..n {
+                    out[a * H + h] = sb[a * bm.k + bm.map[h] as usize];
+                }
+            }
+        }
+        out
     }
 
     fn compat(&self, opp: &[f32]) -> Vec<f32> {
@@ -497,9 +549,11 @@ impl StreetSolver {
         }
         let n = nd.n as usize;
         let off = nd.data_off;
-        let mut r = vec![0.0f32; n * H];
+        let bm = self.bmap(nd);
+        let w = bm.map_or(H, |b| b.k);
+        let mut r = vec![0.0f32; n * w];
         self.regret.load(off, id, &mut r);
-        let strat = regret_match(&r, n);
+        let strat = self.expand(nd, regret_match(&r, n, w));
         let kids = &self.children[nd.child_off as usize..nd.child_off as usize + n];
         let (fp, fneg, fa) = disc;
         let mut v = vec![0.0f32; H];
@@ -512,19 +566,31 @@ impl StreetSolver {
                     v[h] += strat[a * H + h] * cvs[a][h];
                 }
             }
+            let slot = |h: usize| match bm {
+                None => Some(h),
+                Some(b) => if b.map[h] == crate::bucket::NONE { None } else { Some(b.map[h] as usize) },
+            };
             for a in 0..n {
                 for h in 0..H {
-                    let x = &mut r[a * H + h];
-                    *x += cvs[a][h] - v[h];
+                    if let Some(j) = slot(h) {
+                        r[a * w + j] += cvs[a][h] - v[h];
+                    }
+                }
+                for x in &mut r[a * w..(a + 1) * w] {
                     *x *= if *x > 0.0 { fp } else { fneg };
                 }
             }
             self.regret.store(off, id, &r);
-            let mut s = vec![0.0f32; n * H];
+            let mut s = vec![0.0f32; n * w];
             self.sum.load(off, id, &mut s);
             for a in 0..n {
                 for h in 0..H {
-                    s[a * H + h] = (s[a * H + h] + own2[a][h]) * fa;
+                    if let Some(j) = slot(h) {
+                        s[a * w + j] += own2[a][h];
+                    }
+                }
+                for x in &mut s[a * w..(a + 1) * w] {
+                    *x *= fa;
                 }
             }
             self.sum.store(off, id, &s);
@@ -584,9 +650,10 @@ impl StreetSolver {
         }
         let n = nd.n as usize;
         let q = nd.player as usize;
-        let mut s = vec![0.0f32; n * H];
+        let w = self.bmap(nd).map_or(H, |b| b.k);
+        let mut s = vec![0.0f32; n * w];
         self.sum.load(nd.data_off, id, &mut s);
-        let strat = normalize(&s, n);
+        let strat = self.expand(nd, normalize(&s, n, w));
         let kids = &self.children[nd.child_off as usize..nd.child_off as usize + n];
         let cvs: Vec<Vec<f32>> = (0..n).into_par_iter().map(|a| {
             if q == p {
@@ -630,9 +697,10 @@ impl StreetSolver {
                     if x as usize >= n {
                         return Err(format!("action {x} out of range (node has {n})"));
                     }
-                    let mut s = vec![0.0f32; n * H];
+                    let w = self.bmap(nd).map_or(H, |b| b.k);
+                    let mut s = vec![0.0f32; n * w];
                     self.sum.load(nd.data_off, id, &mut s);
-                    let strat = normalize(&s, n);
+                    let strat = self.expand(nd, normalize(&s, n, w));
                     let q = nd.player as usize;
                     for h in 0..H {
                         reach[q][h] *= strat[x as usize * H + h];
@@ -654,10 +722,11 @@ impl StreetSolver {
         Ok(match nd.kind {
             K::Action => {
                 let n = nd.n as usize;
-                let mut s = vec![0.0f32; n * H];
+                let w = self.bmap(nd).map_or(H, |b| b.k);
+                let mut s = vec![0.0f32; n * w];
                 self.sum.load(nd.data_off, id, &mut s);
                 let q = nd.player as usize;
-                NodeView { kind: "action".to_string(), player: nd.player, n, cards: vec![], strategy: normalize(&s, n),
+                NodeView { kind: "action".to_string(), player: nd.player, n, cards: vec![], strategy: self.expand(nd, normalize(&s, n, w)),
                     ev: self.br(id, q, &reach[1 - q], false), range: reach[q].clone() }
             }
             K::Chance => NodeView { kind: "chance".to_string(), player: 0, n: 0,

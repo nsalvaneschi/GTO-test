@@ -24,7 +24,7 @@ fn cfg(board: &str, r: [Vec<f32>; 2], iso: bool, compress: bool) -> StreetConfig
     let board = parse_cards(board);
     let streets = if board.len() == 4 { vec![tc(20.0, &[0.5], 2), tc(20.0, &[0.5], 1)] }
         else { vec![tc(20.0, &[0.5], 1), tc(20.0, &[], 0), tc(20.0, &[], 0)] };
-    StreetConfig { board, ranges: r, streets, iso, compress }
+    StreetConfig { board, ranges: r, streets, iso, compress, buckets: None }
 }
 fn run(c: &StreetConfig, iters: u32) -> f32 {
     let mut s = StreetSolver::new(c, 8 << 30).unwrap();
@@ -115,4 +115,22 @@ fn compressed_close_to_f32() {
 fn flop_solve_runs() {
     let e = run(&cfg("Ks Qs 7s", [sym_range(1), sym_range(2)], true, true), 20);
     assert!(e < 5.0, "{e}");
+}
+
+/// Bucketed vs exact solve on the same turn spot. Exploitability is measured by `br` on the real
+/// 1326-hand game (hand-level best response against the bucket-shared average strategy).
+#[test]
+fn bucketed_turn_vs_exact() {
+    let base = cfg("As Kd 7c 4h", [rnd_range(1), rnd_range(2)], true, false);
+    let mem0 = estimate_memory(&base, u64::MAX).unwrap();
+    let e0 = run(&base, 200);
+    println!("exact: mem {mem0} B, expl {e0:.4}% pot");
+    for k in [10usize, 30, 100] {
+        let mut c = base.clone();
+        c.buckets = Some(k);
+        let mem = estimate_memory(&c, u64::MAX).unwrap();
+        let e = run(&c, 200);
+        println!("buckets {k}: mem {mem} B ({:.1}% of exact), real-game expl {e:.4}% pot", 100.0 * mem as f64 / mem0 as f64);
+        assert!(mem < mem0 && e.is_finite());
+    }
 }
