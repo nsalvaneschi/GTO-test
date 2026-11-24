@@ -10,3 +10,4 @@ Queue:
 5. Polish: rate-limit test, mobile layout check, i18n review notes
 
 Status entries below, newest last.
+- 2026-11-24: handhistory design written by architect (docs/handhistory-design.md). H1..H4 queued; H1 parser starts in parallel with river-drill builder (disjoint dirs).
