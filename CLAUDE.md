@@ -27,3 +27,9 @@ Escalate only on failure or genuine design ambiguity; de-escalate once the desig
 - All UI strings live in `web/src/i18n/{en,es,it}.json` (same keys in all three); no hardcoded text in components.
 - Use ICU-style plurals and locale number formatting (`Intl`). Keep poker terms in a shared glossary (`docs/glossary.md`) so es/it terminology stays consistent (e.g. fold/call/raise, pot, range, equity).
 - Add a test that fails if any key is missing from a locale.
+
+## Accounts and progress (requirement)
+- Login: username + password. Passwords hashed (scrypt/argon2), never logged; httpOnly SameSite session cookie; rate-limit login.
+- Backend: small Node server in `server/` serving `web/dist` + JSON API, SQLite on a persistent volume (path from env, e.g. `RAILWAY_VOLUME_MOUNT_PATH`); deploy target Railway. Never put secrets/tokens in the repo; deploy config via env vars.
+- Progress tracked per user: drill results (spot, user action, solver frequencies, EV loss, time) first; hand-history analysis later (needs `architect` design).
+- All new UI text goes through the en/es/it i18n rules above.
