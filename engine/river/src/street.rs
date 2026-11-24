@@ -7,7 +7,16 @@ use gto_core::Params;
 use rayon::prelude::*;
 #[cfg(not(feature = "rayon"))]
 use crate::seq::*;
-use std::cell::UnsafeCell;
+use std::cell::{RefCell, UnsafeCell};
+
+/// Scratch floats per thread, in units of H (a few dozen live buffers per recursion depth).
+const SCRATCH_H: usize = 192;
+
+thread_local! {
+    /// Per-thread bump scratch for the sequential part of the traversal (no malloc in the hot loop:
+    /// glibc arena locks made 4 threads scale at ~1.7x).
+    static SCRATCH: RefCell<Vec<f32>> = const { RefCell::new(Vec::new()) };
+}
 
 #[derive(Clone)]
 pub struct StreetConfig {
@@ -30,6 +39,30 @@ const NOB: u32 = u32::MAX;
 struct BMap {
     map: Vec<u16>,
     k: usize,
+    /// Live hands and their slots, round-robin over slots (each slot keeps ascending hand order, so
+    /// per-slot sums are bit-identical, but consecutive updates hit different slots: no store-forward chain).
+    rounds: Vec<(u16, u16)>,
+}
+
+fn make_rounds(map: &[u16]) -> Vec<(u16, u16)> {
+    let mut by: Vec<Vec<u16>> = vec![];
+    for (h, &m) in map.iter().enumerate() {
+        if m != crate::bucket::NONE {
+            if by.len() <= m as usize {
+                by.resize(m as usize + 1, vec![]);
+            }
+            by[m as usize].push(h as u16);
+        }
+    }
+    let mut out = vec![];
+    for r in 0..by.iter().map(|v| v.len()).max().unwrap_or(0) {
+        for (j, v) in by.iter().enumerate() {
+            if r < v.len() {
+                out.push((v[r], j as u16));
+            }
+        }
+    }
+    out
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -48,6 +81,8 @@ struct N {
     child_off: u32,
     n: u32,
     data_off: usize,
+    /// Action/Chance: fan out over children with rayon (first street only).
+    par: bool,
     /// Showdown: board id. Chance: chance id. Action: bucket map id (`NOB` = none).
     aux: u32,
 }
@@ -60,8 +95,10 @@ struct Orbit {
 }
 
 struct Board {
-    strength: Vec<u32>,
+    /// Live combos sorted by strength.
     order: Vec<u16>,
+    /// Exclusive end position (in `order`) of each group of equal strength.
+    ends: Vec<u16>,
 }
 
 fn perms() -> Vec<[u8; 4]> {
@@ -97,6 +134,9 @@ struct Builder<'a> {
     boards: Vec<Board>,
     bmaps: Vec<BMap>,
     bcache: std::collections::HashMap<u64, u32>,
+    board_cache: std::collections::HashMap<u64, u32>,
+    /// Dry run: distinct boards that need a bucket map (computed in parallel before the real build).
+    dry_keys: Vec<Vec<u8>>,
     data_len: usize,
     n_nodes: usize,
     n_action: usize,
@@ -127,19 +167,28 @@ impl<'a> Builder<'a> {
         let n = ch.len() as u32;
         self.children.extend(ch);
         let data_off = if kind == K::Action { self.data_len - n as usize * w } else { 0 };
-        self.nodes.push(N { kind, player, pay, child_off, n, data_off, aux });
+        self.nodes.push(N { kind, player, pay, child_off, n, data_off, par: false, aux });
         (self.nodes.len() - 1) as u32
     }
 
     fn street(&mut self, board: &[u8], s: usize, pot: f32, stack: f32) -> u32 {
         let mut bid = 0;
         if s + 1 == self.cfg.streets.len() {
-            self.n_boards += 1;
-            if !self.dry {
-                let mut mask = 0u64;
-                for &b in board {
-                    mask |= 1 << b;
-                }
+            let mut mask = 0u64;
+            for &b in board {
+                mask |= 1 << b;
+            }
+            let mut fresh = false;
+            // One Board per distinct 5-card set (the same river is reached via many tree paths).
+            if let Some(&i) = self.board_cache.get(&mask) {
+                bid = i;
+            } else {
+                bid = self.boards.len() as u32;
+                self.board_cache.insert(mask, bid);
+                self.n_boards += 1;
+                fresh = true;
+            }
+            if !self.dry && fresh {
                 let mut strength = vec![0u32; H];
                 let mut order: Vec<u16> = vec![];
                 for (i, &(a, b)) in self.combos.iter().enumerate() {
@@ -150,21 +199,32 @@ impl<'a> Builder<'a> {
                     order.push(i as u16);
                 }
                 order.sort_by_key(|&i| strength[i as usize]);
-                self.boards.push(Board { strength, order });
-                bid = (self.boards.len() - 1) as u32;
+                let mut ends = vec![];
+                for k in 1..=order.len() {
+                    if k == order.len() || strength[order[k] as usize] != strength[order[k - 1] as usize] {
+                        ends.push(k as u16);
+                    }
+                }
+                self.boards.push(Board { order, ends });
             }
         }
         let mut bm = NOB;
         if let Some(k) = self.cfg.buckets {
             bm = 0;
-            if !self.dry {
+            if self.dry {
+                let key = board.iter().fold(0u64, |m, &b| m | 1 << b);
+                if self.bcache.insert(key, 0).is_none() {
+                    self.dry_keys.push(board.to_vec());
+                }
+            } else {
                 let key = board.iter().fold(0u64, |m, &b| m | 1 << b);
                 bm = match self.bcache.get(&key) {
                     Some(&i) => i,
                     None => {
                         let map = crate::bucket::bucket_board(board, k);
                         let kk = map.iter().filter(|&&x| x != crate::bucket::NONE).map(|&x| x as usize + 1).max().unwrap_or(1);
-                        self.bmaps.push(BMap { map, k: kk });
+                        let rounds = make_rounds(&map);
+                        self.bmaps.push(BMap { map, k: kk, rounds });
                         self.bcache.insert(key, self.bmaps.len() as u32 - 1);
                         self.bmaps.len() as u32 - 1
                     }
@@ -184,7 +244,12 @@ impl<'a> Builder<'a> {
         if !self.dry {
             self.chances.push(orbits);
         }
-        self.push(K::Chance, 0, 0.0, vec![], id)
+        let nid = self.push(K::Chance, 0, 0.0, vec![], id);
+        if !self.dry {
+            // Only the first street fans out (tasks below are small; fine-grained rayon thrashes futexes).
+            self.nodes[nid as usize].par = ctx.s == 0;
+        }
+        nid
     }
 
     fn orbits(&mut self, ctx: &Ctx, c: f32) -> Vec<Orbit> {
@@ -256,7 +321,11 @@ impl<'a> Builder<'a> {
                 ch.push(self.go(ctx, nc, o, aggr + 1));
             }
         }
-        self.push(K::Action, me as u8, 0.0, ch, ctx.bm)
+        let id = self.push(K::Action, me as u8, 0.0, ch, ctx.bm);
+        if !self.dry {
+            self.nodes[id as usize].par = ctx.s == 0;
+        }
+        id
     }
 }
 
@@ -281,7 +350,7 @@ fn make<'a>(cfg: &'a StreetConfig, dry: bool, cb: &'a [(u8, u8)], ps: &'a [[u8; 
     }).collect();
     Builder {
         cfg, dry, combos: cb, hmap: hm, perms: ps, range_ok, nodes: vec![], children: vec![], chances: vec![],
-        boards: vec![], bmaps: vec![], bcache: Default::default(), data_len: 0, n_nodes: 0, n_action: 0, n_boards: 0,
+        boards: vec![], bmaps: vec![], bcache: Default::default(), board_cache: Default::default(), dry_keys: vec![], data_len: 0, n_nodes: 0, n_action: 0, n_boards: 0,
     }
 }
 
@@ -293,6 +362,10 @@ fn run_build(b: &mut Builder) -> u32 {
 
 /// Estimated bytes of solver state (regret + strategy sum, tree, boards); Err if above `budget_bytes`.
 pub fn estimate_memory(cfg: &StreetConfig, budget_bytes: u64) -> Result<u64, String> {
+    estimate_keys(cfg, budget_bytes).map(|x| x.0)
+}
+
+fn estimate_keys(cfg: &StreetConfig, budget_bytes: u64) -> Result<(u64, Vec<Vec<u8>>), String> {
     let (cb, ps, hm) = build_tables();
     let mut b = make(cfg, true, &cb, &ps, &hm);
     run_build(&mut b);
@@ -301,7 +374,7 @@ pub fn estimate_memory(cfg: &StreetConfig, budget_bytes: u64) -> Result<u64, Str
     if bytes > budget_bytes {
         Err(format!("estimated {bytes} bytes exceeds budget {budget_bytes}"))
     } else {
-        Ok(bytes)
+        Ok((bytes, std::mem::take(&mut b.dry_keys)))
     }
 }
 
@@ -363,6 +436,11 @@ pub struct StreetSolver {
     root: u32,
     combos: Vec<(u8, u8)>,
     hmap: Vec<Vec<u16>>,
+    /// Identity slot map for unbucketed nodes (and its rounds list).
+    ident: Vec<u16>,
+    ident_rounds: Vec<(u16, u16)>,
+    /// Per card: combos containing it.
+    card_hands: Vec<Vec<u16>>,
     w: [Vec<f32>; 2],
     norm: f32,
     pot: f32,
@@ -372,15 +450,13 @@ pub struct StreetSolver {
     pub iters: u32,
 }
 
-fn regret_match(r: &[f32], n: usize, w: usize) -> Vec<f32> {
-    let mut out = vec![0.0f32; n * w];
+fn regret_match_into(r: &[f32], n: usize, w: usize, out: &mut [f32]) {
     for h in 0..w {
         let tot: f32 = (0..n).map(|a| r[a * w + h].max(0.0)).sum();
         for a in 0..n {
             out[a * w + h] = if tot > 0.0 { r[a * w + h].max(0.0) / tot } else { 1.0 / n as f32 };
         }
     }
-    out
 }
 
 fn normalize(s: &[f32], n: usize, w: usize) -> Vec<f32> {
@@ -396,9 +472,18 @@ fn normalize(s: &[f32], n: usize, w: usize) -> Vec<f32> {
 
 impl StreetSolver {
     pub fn new(cfg: &StreetConfig, budget_bytes: u64) -> Result<Self, String> {
-        estimate_memory(cfg, budget_bytes)?;
+        let (_, keys) = estimate_keys(cfg, budget_bytes)?;
         let (cb, ps, hm) = build_tables();
         let mut b = make(cfg, false, &cb, &ps, &hm);
+        if let Some(k) = cfg.buckets {
+            let maps: Vec<Vec<u16>> = keys.par_iter().map(|bd| crate::bucket::bucket_board(bd, k)).collect();
+            for (bd, map) in keys.iter().zip(maps) {
+                let kk = map.iter().filter(|&&x| x != crate::bucket::NONE).map(|&x| x as usize + 1).max().unwrap_or(1);
+                let rounds = make_rounds(&map);
+                b.bmaps.push(BMap { map, k: kk, rounds });
+                b.bcache.insert(bd.iter().fold(0u64, |m, &c| m | 1 << c), b.bmaps.len() as u32 - 1);
+            }
+        }
         let root = run_build(&mut b);
         let (nodes, children, chances, boards, data_len) = (b.nodes, b.children, b.chances, b.boards, b.data_len);
         let bmaps = b.bmaps;
@@ -411,7 +496,10 @@ impl StreetSolver {
         }
         let n_nodes = nodes.len();
         let mut s = StreetSolver {
-            nodes, children, chances, boards, bmaps, root, combos: cb, hmap: hm, w, norm: 1.0, pot: cfg.streets[0].pot,
+            nodes, children, chances, boards, bmaps, root, card_hands: (0..52u8).map(|c| (0..H as u16).filter(|&h| { let (a, b) = cb[h as usize]; a == c || b == c }).collect()).collect(),
+            ident: (0..H as u16).collect(),
+            ident_rounds: (0..H as u16).map(|h| (h, h)).collect(),
+            combos: cb, hmap: hm, w, norm: 1.0, pot: cfg.streets[0].pot,
             regret: Arr::new(data_len, n_nodes, cfg.compress), sum: Arr::new(data_len, n_nodes, cfg.compress),
             params: Params::dcfr(), iters: 0,
         };
@@ -470,142 +558,282 @@ impl StreetSolver {
         self.combos.iter().enumerate().map(|(i, &(a, b))| tot - cs[a as usize] - cs[b as usize] + opp[i]).collect()
     }
 
-    fn showdown(&self, bd: &Board, opp: &[f32]) -> Vec<f32> {
-        let mut out = vec![0.0f32; H];
-        let n = bd.order.len();
-        for dir in [1.0f32, -1.0] {
-            let mut cum = [0.0f32; 52];
-            let mut tot = 0.0;
-            let idx = |k: usize| bd.order[if dir > 0.0 { k } else { n - 1 - k }] as usize;
-            let mut k = 0;
-            while k < n {
-                let st = bd.strength[idx(k)];
-                let mut e = k;
-                while e < n && bd.strength[idx(e)] == st {
-                    e += 1;
-                }
-                for j in k..e {
-                    let h = idx(j);
-                    let (a, b) = self.combos[h];
-                    out[h] += dir * (tot - cum[a as usize] - cum[b as usize]);
-                }
-                for j in k..e {
-                    let h = idx(j);
-                    let (a, b) = self.combos[h];
-                    cum[a as usize] += opp[h];
-                    cum[b as usize] += opp[h];
-                    tot += opp[h];
-                }
-                k = e;
+    /// Showdown values scaled by `pay`, written to `out`.
+    /// out[h] = ((sum of weaker opp) - (sum of stronger opp), card-blocked removed) * pay. The forward
+    /// and backward sweeps run interleaved (independent dependency chains) with the same per-hand
+    /// arithmetic as two sequential sweeps, so results are bit-identical.
+    fn showdown(&self, bd: &Board, opp: &[f32], pay: f32, out: &mut [f32]) {
+        assert!(opp.len() == H && out.len() == H);
+        let combos = &self.combos[..];
+        out.fill(0.0);
+        let mut y = [0.0f32; H];
+        let (mut cf, mut cb) = ([0.0f32; 64], [0.0f32; 64]);
+        let (mut tf, mut tb) = (0.0f32, 0.0f32);
+        // One group of the sweep; `rev` walks the group backwards. Indices are < H by construction.
+        #[inline(always)]
+        fn step(grp: &[u16], rev: bool, combos: &[(u8, u8)], opp: &[f32], cum: &mut [f32; 64], tot: &mut f32, dst: &mut [f32]) {
+            if grp.len() == 1 {
+                let h = grp[0] as usize;
+                let (a, b) = unsafe { *combos.get_unchecked(h) };
+                let (a, b) = (a as usize & 63, b as usize & 63);
+                let o = unsafe { *opp.get_unchecked(h) };
+                unsafe { *dst.get_unchecked_mut(h) = *tot - cum[a] - cum[b] };
+                cum[a] += o;
+                cum[b] += o;
+                *tot += o;
+                return;
             }
+            let t0 = *tot;
+            for &h in grp {
+                let h = h as usize;
+                let (a, b) = unsafe { *combos.get_unchecked(h) };
+                unsafe { *dst.get_unchecked_mut(h) = t0 - cum[a as usize & 63] - cum[b as usize & 63] };
+            }
+            let mut t = t0;
+            let mut upd = |h: u16| {
+                let h = h as usize;
+                let (a, b) = unsafe { *combos.get_unchecked(h) };
+                let o = unsafe { *opp.get_unchecked(h) };
+                cum[a as usize & 63] += o;
+                cum[b as usize & 63] += o;
+                t += o;
+            };
+            if rev { grp.iter().rev().for_each(|&h| upd(h)) } else { grp.iter().for_each(|&h| upd(h)) }
+            *tot = t;
         }
-        out
+        let ng = bd.ends.len();
+        let end = |g: usize| bd.ends[g] as usize;
+        for i in 0..ng {
+            let (gf, gb) = (i, ng - 1 - i);
+            let (sf, sb) = (if gf == 0 { 0 } else { end(gf - 1) }, if gb == 0 { 0 } else { end(gb - 1) });
+            step(&bd.order[sf..end(gf)], false, combos, opp, &mut cf, &mut tf, out);
+            step(&bd.order[sb..end(gb)], true, combos, opp, &mut cb, &mut tb, &mut y);
+        }
+        for &h in &bd.order {
+            let h = h as usize;
+            out[h] = (out[h] + -1.0 * y[h]) * pay;
+        }
+    }
+
+    fn terminal_into(&self, nd: &N, p: usize, opp: &[f32], out: &mut [f32]) {
+        if nd.kind == K::Showdown {
+            return self.showdown(&self.boards[nd.aux as usize], opp, nd.pay, out);
+        }
+        let sign = if nd.player as usize == p { -1.0 } else { 1.0 };
+        let mut cs = [0.0f32; 52];
+        let mut tot = 0.0;
+        for (&(a, b), &o) in self.combos.iter().zip(opp) {
+            cs[a as usize] += o;
+            cs[b as usize] += o;
+            tot += o;
+        }
+        for ((d, &(a, b)), &o) in out.iter_mut().zip(&self.combos).zip(opp) {
+            *d = (tot - cs[a as usize] - cs[b as usize] + o) * sign * nd.pay;
+        }
     }
 
     fn terminal(&self, nd: &N, p: usize, opp: &[f32]) -> Vec<f32> {
-        let mut v = if nd.kind == K::Showdown {
-            self.showdown(&self.boards[nd.aux as usize], opp)
-        } else {
-            let sign = if nd.player as usize == p { -1.0 } else { 1.0 };
-            self.compat(opp).into_iter().map(|x| x * sign).collect()
-        };
-        for x in v.iter_mut() {
-            *x *= nd.pay;
-        }
-        v
+        let mut out = vec![0.0f32; H];
+        self.terminal_into(nd, p, opp, &mut out);
+        out
     }
 
     fn mask(&self, v: &[f32], card: u8) -> Vec<f32> {
-        v.iter().zip(&self.combos).map(|(&x, &(a, b))| if a == card || b == card { 0.0 } else { x }).collect()
+        let mut out = v.to_vec();
+        self.zero_card(&mut out, card);
+        out
+    }
+
+    fn zero_card(&self, v: &mut [f32], card: u8) {
+        for &h in &self.card_hands[card as usize] {
+            v[h as usize] = 0.0;
+        }
     }
 
     /// Scatter canonical-coordinate values into member coordinates: out[perm(h)] += v[h].
     fn scatter(&self, out: &mut [f32], v: &[f32], perm: u8) {
+        if perm == 0 {
+            for (o, &x) in out.iter_mut().zip(v) {
+                *o += x;
+            }
+            return;
+        }
         let m = &self.hmap[perm as usize];
         for h in 0..H {
             out[m[h] as usize] += v[h];
         }
     }
 
-    fn cfr(&self, id: usize, p: usize, own: &[f32], opp: &[f32], disc: (f32, f32, f32)) -> Vec<f32> {
+    /// Entry for a (possibly parallel) task: sequential subtrees use the thread's scratch.
+    fn run(&self, id: usize, p: usize, own: &[f32], opp: &[f32], disc: (f32, f32, f32), out: &mut [f32]) {
+        if self.nodes[id].par {
+            return self.cfr(id, p, own, opp, disc, out, &mut []);
+        }
+        SCRATCH.with(|s| {
+            let mut s = s.borrow_mut();
+            if s.is_empty() {
+                s.resize(SCRATCH_H * H, 0.0);
+            }
+            self.cfr(id, p, own, opp, disc, out, &mut s)
+        });
+    }
+
+    /// Counterfactual values of `p`'s hands at node `id` into `out` (H). `sc` is bump scratch.
+    /// On x86_64 with AVX2 the body is compiled for it (no FMA, so results equal the SSE2 build bit for bit).
+    #[allow(clippy::too_many_arguments)]
+    fn cfr(&self, id: usize, p: usize, own: &[f32], opp: &[f32], disc: (f32, f32, f32), out: &mut [f32], sc: &mut [f32]) {
+        #[cfg(target_arch = "x86_64")]
+        if std::is_x86_feature_detected!("avx2") {
+            // SAFETY: feature checked above.
+            return unsafe { self.cfr_avx2(id, p, own, opp, disc, out, sc) };
+        }
+        self.cfr_impl(id, p, own, opp, disc, out, sc)
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    #[target_feature(enable = "avx2")]
+    #[allow(clippy::too_many_arguments)]
+    unsafe fn cfr_avx2(&self, id: usize, p: usize, own: &[f32], opp: &[f32], disc: (f32, f32, f32), out: &mut [f32], sc: &mut [f32]) {
+        self.cfr_impl(id, p, own, opp, disc, out, sc)
+    }
+
+    #[inline(always)]
+    #[allow(clippy::too_many_arguments)]
+    fn cfr_impl(&self, id: usize, p: usize, own: &[f32], opp: &[f32], disc: (f32, f32, f32), out: &mut [f32], sc: &mut [f32]) {
         let nd = &self.nodes[id];
         match nd.kind {
-            K::Fold | K::Showdown => return self.terminal(nd, p, opp),
+            K::Fold | K::Showdown => return self.terminal_into(nd, p, opp, out),
             K::Chance => {
-                let res: Vec<Vec<f32>> = self.chances[nd.aux as usize].par_iter().map(|o| {
-                    let (own2, opp2) = (self.mask(own, o.card), self.mask(opp, o.card));
-                    let cv = self.cfr(o.child as usize, p, &own2, &opp2, disc);
-                    self.mask(&cv, o.card)
-                }).collect();
-                let mut v = vec![0.0f32; H];
-                for (o, cv) in self.chances[nd.aux as usize].iter().zip(&res) {
-                    for &(_, perm) in &o.members {
-                        self.scatter(&mut v, cv, perm);
+                out.fill(0.0);
+                let os = &self.chances[nd.aux as usize];
+                if nd.par {
+                    let mut res = vec![0.0f32; os.len() * H];
+                    res.par_chunks_mut(H).zip(os.par_iter()).for_each(|(cv, o)| {
+                        let (own2, opp2) = (self.mask(own, o.card), self.mask(opp, o.card));
+                        self.run(o.child as usize, p, &own2, &opp2, disc, cv);
+                        self.zero_card(cv, o.card);
+                    });
+                    for (o, cv) in os.iter().zip(res.chunks(H)) {
+                        for &(_, perm) in &o.members {
+                            self.scatter(out, cv, perm);
+                        }
+                    }
+                } else {
+                    let mut heap;
+                    let sc = if sc.len() >= 3 * H { sc } else { heap = vec![0.0f32; 3 * H]; &mut heap[..] };
+                    let (own2, sc) = sc.split_at_mut(H);
+                    let (opp2, sc) = sc.split_at_mut(H);
+                    let (cv, sc) = sc.split_at_mut(H);
+                    for o in os {
+                        own2.copy_from_slice(own);
+                        opp2.copy_from_slice(opp);
+                        self.zero_card(own2, o.card);
+                        self.zero_card(opp2, o.card);
+                        self.cfr(o.child as usize, p, own2, opp2, disc, cv, sc);
+                        self.zero_card(cv, o.card);
+                        for &(_, perm) in &o.members {
+                            self.scatter(out, cv, perm);
+                        }
                     }
                 }
-                return v;
+                return;
             }
             K::Action => {}
         }
         let n = nd.n as usize;
         let off = nd.data_off;
-        let bm = self.bmap(nd);
-        let w = bm.map_or(H, |b| b.k);
-        let mut r = vec![0.0f32; n * w];
-        self.regret.load(off, id, &mut r);
-        let strat = self.expand(nd, regret_match(&r, n, w));
+        let (map, w, rounds): (&[u16], usize, &[(u16, u16)]) = match self.bmap(nd) {
+            Some(b) => (&b.map, b.k, &b.rounds),
+            None => (&self.ident, H, &self.ident_rounds),
+        };
+        let need = 3 * n * H + 3 * n * w + 3 * (w + 1);
+        let mut heap;
+        let sc = if !nd.par && sc.len() >= need { sc } else { heap = vec![0.0f32; need]; &mut heap[..] };
+        let (strat, sc) = sc.split_at_mut(n * H);
+        let (sl, sc) = sc.split_at_mut(n * H); // own2 (player node) or opp2 (opponent node)
+        let (cvs, sc) = sc.split_at_mut(n * H);
+        let (r, sc) = sc.split_at_mut(n * w);
+        let (sb, sc) = sc.split_at_mut(n * w);
+        let (sm, sc) = sc.split_at_mut(n * w);
+        let (ext, sc) = sc.split_at_mut(w + 1);
+        let (rr, sc) = sc.split_at_mut(w + 1);
+        let (ss, sc) = sc.split_at_mut(w + 1);
+        self.regret.load(off, id, r);
+        regret_match_into(r, n, w, sb);
+        // Per-hand strategy rows (blocked hands, slot >= w, get the uniform entry).
+        for a in 0..n {
+            ext[..w].copy_from_slice(&sb[a * w..(a + 1) * w]);
+            ext[w] = 1.0 / n as f32;
+            for (o, &m) in strat[a * H..(a + 1) * H].iter_mut().zip(map) {
+                *o = ext[(m as usize).min(w)];
+            }
+        }
         let kids = &self.children[nd.child_off as usize..nd.child_off as usize + n];
         let (fp, fneg, fa) = disc;
-        let mut v = vec![0.0f32; H];
-        if nd.player as usize == p {
-            let own2: Vec<Vec<f32>> = (0..n).map(|a| (0..H).map(|h| own[h] * strat[a * H + h]).collect()).collect();
-            let cvs: Vec<Vec<f32>> = (0..n).into_par_iter()
-                .map(|a| self.cfr(kids[a] as usize, p, &own2[a], opp, disc)).collect();
+        let is_p = nd.player as usize == p;
+        if is_p {
             for a in 0..n {
-                for h in 0..H {
-                    v[h] += strat[a * H + h] * cvs[a][h];
+                for ((o, &x), &s) in sl[a * H..(a + 1) * H].iter_mut().zip(own).zip(&strat[a * H..(a + 1) * H]) {
+                    *o = x * s;
                 }
             }
-            let slot = |h: usize| match bm {
-                None => Some(h),
-                Some(b) => if b.map[h] == crate::bucket::NONE { None } else { Some(b.map[h] as usize) },
-            };
-            for a in 0..n {
-                for h in 0..H {
-                    if let Some(j) = slot(h) {
-                        r[a * w + j] += cvs[a][h] - v[h];
-                    }
-                }
-                for x in &mut r[a * w..(a + 1) * w] {
-                    *x *= if *x > 0.0 { fp } else { fneg };
-                }
-            }
-            self.regret.store(off, id, &r);
-            let mut s = vec![0.0f32; n * w];
-            self.sum.load(off, id, &mut s);
-            for a in 0..n {
-                for h in 0..H {
-                    if let Some(j) = slot(h) {
-                        s[a * w + j] += own2[a][h];
-                    }
-                }
-                for x in &mut s[a * w..(a + 1) * w] {
-                    *x *= fa;
-                }
-            }
-            self.sum.store(off, id, &s);
         } else {
-            let cvs: Vec<Vec<f32>> = (0..n).into_par_iter().map(|a| {
-                let opp2: Vec<f32> = (0..H).map(|h| opp[h] * strat[a * H + h]).collect();
-                self.cfr(kids[a] as usize, p, own, &opp2, disc)
-            }).collect();
-            for cv in &cvs {
-                for h in 0..H {
-                    v[h] += cv[h];
+            for a in 0..n {
+                for ((o, &x), &s) in sl[a * H..(a + 1) * H].iter_mut().zip(opp).zip(&strat[a * H..(a + 1) * H]) {
+                    *o = x * s;
                 }
             }
         }
-        v
+        if nd.par {
+            let sl = &*sl;
+            cvs.par_chunks_mut(H).enumerate().for_each(|(a, o)| {
+                let k = kids[a] as usize;
+                let x = &sl[a * H..(a + 1) * H];
+                if is_p { self.run(k, p, x, opp, disc, o) } else { self.run(k, p, own, x, disc, o) }
+            });
+        } else {
+            for a in 0..n {
+                let k = kids[a] as usize;
+                let x = &sl[a * H..(a + 1) * H];
+                let o = &mut cvs[a * H..(a + 1) * H];
+                if is_p { self.cfr(k, p, x, opp, disc, o, sc) } else { self.cfr(k, p, own, x, disc, o, sc) }
+            }
+        }
+        out.fill(0.0);
+        if is_p {
+            for a in 0..n {
+                for ((vv, &s), &c) in out.iter_mut().zip(&strat[a * H..(a + 1) * H]).zip(&cvs[a * H..(a + 1) * H]) {
+                    *vv += s * c;
+                }
+            }
+            self.sum.load(off, id, sm);
+            for a in 0..n {
+                rr[..w].copy_from_slice(&r[a * w..(a + 1) * w]);
+                ss[..w].copy_from_slice(&sm[a * w..(a + 1) * w]);
+                rr[w] = 0.0;
+                ss[w] = 0.0;
+                let (cv, o2) = (&cvs[a * H..(a + 1) * H], &sl[a * H..(a + 1) * H]);
+                for &(h, j) in rounds {
+                    let (h, j) = (h as usize, j as usize);
+                    rr[j] += cv[h] - out[h];
+                    ss[j] += o2[h];
+                }
+                for (d, x) in r[a * w..(a + 1) * w].iter_mut().zip(rr.iter()) {
+                    *d = *x * if *x > 0.0 { fp } else { fneg };
+                }
+                for (d, x) in sm[a * w..(a + 1) * w].iter_mut().zip(ss.iter()) {
+                    *d = *x * fa;
+                }
+            }
+            self.regret.store(off, id, r);
+            self.sum.store(off, id, sm);
+        } else {
+            for cv in cvs.chunks(H) {
+                for (vv, &c) in out.iter_mut().zip(cv) {
+                    *vv += c;
+                }
+            }
+        }
     }
 
     pub fn iterate(&mut self) {
@@ -613,8 +841,8 @@ impl StreetSolver {
         let t = self.iters as f64;
         let disc = (self.params.pos(t) as f32, self.params.neg(t) as f32, self.params.avg(t) as f32);
         for p in 0..2 {
-            let (own, opp) = (self.w[p].clone(), self.w[1 - p].clone());
-            self.cfr(self.root as usize, p, &own, &opp, disc);
+            let mut out = vec![0.0f32; H];
+            self.run(self.root as usize, p, &self.w[p], &self.w[1 - p], disc, &mut out);
         }
     }
 
@@ -633,13 +861,14 @@ impl StreetSolver {
             K::Chance => {
                 let items: Vec<(usize, u8, u8)> = self.chances[nd.aux as usize].iter().enumerate()
                     .flat_map(|(i, o)| o.members.iter().map(move |&(c, pm)| (i, c, pm))).collect();
-                let res: Vec<Vec<f32>> = items.par_iter().map(|&(i, ck, pm)| {
+                let f = |&(i, ck, pm): &(usize, u8, u8)| {
                     let o = &self.chances[nd.aux as usize][i];
                     let m = &self.hmap[pm as usize];
                     let oppk = self.mask(opp, ck);
                     let oppc: Vec<f32> = (0..H).map(|h| oppk[m[h] as usize]).collect();
                     self.mask(&self.br(o.child as usize, p, &oppc, best), o.card)
-                }).collect();
+                };
+                let res: Vec<Vec<f32>> = if nd.par { items.par_iter().map(f).collect() } else { items.iter().map(f).collect() };
                 let mut v = vec![0.0f32; H];
                 for (&(_, _, pm), cv) in items.iter().zip(&res) {
                     self.scatter(&mut v, cv, pm);
@@ -655,14 +884,15 @@ impl StreetSolver {
         self.sum.load(nd.data_off, id, &mut s);
         let strat = self.expand(nd, normalize(&s, n, w));
         let kids = &self.children[nd.child_off as usize..nd.child_off as usize + n];
-        let cvs: Vec<Vec<f32>> = (0..n).into_par_iter().map(|a| {
+        let f = |a: usize| {
             if q == p {
                 self.br(kids[a] as usize, p, opp, best)
             } else {
                 let opp2: Vec<f32> = (0..H).map(|h| opp[h] * strat[a * H + h]).collect();
                 self.br(kids[a] as usize, p, &opp2, best)
             }
-        }).collect();
+        };
+        let cvs: Vec<Vec<f32>> = if nd.par { (0..n).into_par_iter().map(f).collect() } else { (0..n).map(f).collect() };
         let mut v = vec![if q == p && best { f32::NEG_INFINITY } else { 0.0 }; H];
         for (a, cv) in cvs.iter().enumerate() {
             for h in 0..H {
