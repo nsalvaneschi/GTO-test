@@ -79,6 +79,7 @@
   "drill.cancel": "Annulla",
   "street.river": "River",
   "street.turn": "Turn",
+  "drill.solvedTo": "Risolto con {value}",
   "drill.history": "Azione finora",
   "drill.noHistory": "nessuna, parli per primo",
   "progress.loading": "Caricamento...",
