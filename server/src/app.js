@@ -1,7 +1,7 @@
 import { createServer } from 'node:http';
 import { randomBytes, scrypt, timingSafeEqual, createHash } from 'node:crypto';
 import { readFile, stat } from 'node:fs/promises';
-import { join, normalize, extname, sep } from 'node:path';
+import { join, normalize, extname, sep, resolve } from 'node:path';
 import { summarize } from './stats.js';
 
 const SESSION_MS = 30 * 86400000;
@@ -10,6 +10,10 @@ const COOKIE = 'sid';
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css',
   '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon',
   '.wasm': 'application/wasm', '.txt': 'text/plain', '.woff2': 'font/woff2', '.map': 'application/json' };
+
+// Vite app: module scripts + module workers from self, WASM compile, inline <style>/style="" used by the UI.
+const CSP = "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; style-src 'self' 'unsafe-inline'; " +
+  "img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'";
 
 const sha256 = (s) => createHash('sha256').update(s).digest('hex');
 const scryptAsync = (pw, salt) => new Promise((res, rej) =>
@@ -174,7 +178,8 @@ const numParam = (url, k) => { const v = url.searchParams.get(k); if (v === null
   const n = Number(v); if (v === '' || !Number.isFinite(n)) throw new HttpError(400, `invalid_${k}`); return n; };
 
 export function createApp({ db, webDist, now = Date.now, rateLimit = { max: 10, windowMs: 15 * 60000 },
-  hhRateLimit = { max: 30, windowMs: 60000 }, hhMaxHands = 20000 }) {
+  hhRateLimit = { max: 30, windowMs: 60000 }, hhMaxHands = 20000, trustProxy = false }) {
+  if (webDist) webDist = resolve(webDist);
   const limiter = makeLimiter(rateLimit, now);
   const hhLimiter = makeLimiter(hhRateLimit, now);
   // Fixed dummy hash so unknown-user logins cost the same as wrong-password ones.
@@ -206,7 +211,12 @@ export function createApp({ db, webDist, now = Date.now, rateLimit = { max: 10, 
     results: db.prepare('SELECT spot_type, action, solver_freqs, ev_loss, created_at FROM drill_results WHERE user_id = ?'),
   };
 
-  const isHttps = (req) => !!req.socket.encrypted || req.headers['x-forwarded-proto'] === 'https';
+  // x-forwarded-* are client-controlled unless a trusted proxy (Railway) sets them: only honoured with trustProxy.
+  const isHttps = (req) => !!req.socket.encrypted || (trustProxy && req.headers['x-forwarded-proto'] === 'https');
+  const clientIp = (req) => {
+    const xff = trustProxy ? String(req.headers['x-forwarded-for'] ?? '').split(',').pop().trim() : '';
+    return xff || req.socket.remoteAddress || '';
+  };
   const cookieOf = (req) => {
     for (const p of (req.headers.cookie ?? '').split(';')) {
       const i = p.indexOf('=');
@@ -256,7 +266,7 @@ export function createApp({ db, webDist, now = Date.now, rateLimit = { max: 10, 
 
   async function api(req, res, path) {
     const m = req.method;
-    const ip = req.socket.remoteAddress ?? '';
+    const ip = clientIp(req);
     if (path === '/api/health' && m === 'GET') return send(res, 200, { ok: true });
 
     if (path === '/api/register' && m === 'POST') {
@@ -433,7 +443,8 @@ export function createApp({ db, webDist, now = Date.now, rateLimit = { max: 10, 
     }
     try {
       const data = await readFile(file);
-      res.writeHead(200, { 'content-type': MIME[extname(file)] ?? 'application/octet-stream', 'x-content-type-options': 'nosniff' });
+      res.writeHead(200, { 'content-type': MIME[extname(file)] ?? 'application/octet-stream', 'x-content-type-options': 'nosniff',
+        'content-security-policy': CSP, 'referrer-policy': 'same-origin', 'x-frame-options': 'DENY' });
       res.end(req.method === 'HEAD' ? undefined : data);
     } catch { send(res, 404, { error: 'not_found' }); }
   }

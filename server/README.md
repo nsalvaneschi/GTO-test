@@ -19,6 +19,6 @@ Streak = consecutive UTC days with >= 1 answer ending today (or yesterday). Spot
 1. Nothing to build locally: the root Dockerfile builds the WASM solver and web app itself (multi-stage), so deploy straight from the repo.
 2. Railway dashboard: New Project > Deploy from GitHub repo (or `railway up` after `railway login` on your own machine). `railway.json` selects the root Dockerfile.
 3. Service > Volumes > Add Volume, mount path `/data`. Railway then sets `RAILWAY_VOLUME_MOUNT_PATH=/data` and the DB is `/data/app.db`. (Or set `DB_PATH` explicitly.)
-4. Variables: nothing secret is required. `PORT` is injected by Railway. Optional: `WEB_DIST`, `DB_PATH`.
-5. Settings > Networking > Generate Domain (HTTPS; the server sees `x-forwarded-proto` and sets the cookie `Secure`). Healthcheck: `/api/health`.
+4. Variables: nothing secret is required. `PORT` is injected by Railway. Optional: `WEB_DIST`, `DB_PATH`, `TRUST_PROXY` (`1`/`0`). Static responses carry a CSP (`script-src 'self' 'wasm-unsafe-eval'`, `worker-src 'self'`, inline styles allowed), nosniff, X-Frame-Options DENY.
+5. Settings > Networking > Generate Domain (HTTPS; Railway terminates TLS; the server trusts `x-forwarded-proto`/`x-forwarded-for` only when `TRUST_PROXY=1`, which is the default when `RAILWAY_ENVIRONMENT` is set, else off, so the cookie is `Secure` and the rate limiter sees the real client IP). Healthcheck: `/api/health`.
 Use a single replica (SQLite + in-memory rate limiter).

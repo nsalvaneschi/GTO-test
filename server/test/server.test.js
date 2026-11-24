@@ -44,7 +44,7 @@ test('register/me/logout/login happy path + cookie flags', async () => {
 });
 
 test('Secure flag when behind https proxy', async () => {
-  const s = await boot();
+  const s = await boot({ trustProxy: true });
   const r = await fetch(s.base + '/api/register', { method: 'POST',
     headers: { 'content-type': 'application/json', 'x-forwarded-proto': 'https' }, body: JSON.stringify(creds('harry')) });
   assert.ok(r.headers.get('set-cookie').includes('; Secure'));
