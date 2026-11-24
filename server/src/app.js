@@ -181,6 +181,7 @@ export function createApp({ db, webDist, now = Date.now, rateLimit = { max: 10, 
   hhRateLimit = { max: 30, windowMs: 60000 }, hhMaxHands = 20000, trustProxy = false }) {
   if (webDist) webDist = resolve(webDist);
   const limiter = makeLimiter(rateLimit, now);
+  const ipLimiter = makeLimiter({ max: rateLimit.max * 10, windowMs: rateLimit.windowMs }, now); // spraying many usernames from one IP
   const hhLimiter = makeLimiter(hhRateLimit, now);
   // Fixed dummy hash so unknown-user logins cost the same as wrong-password ones.
   const dummy = hashPassword('dummy-password');
@@ -191,6 +192,10 @@ export function createApp({ db, webDist, now = Date.now, rateLimit = { max: 10, 
     insSess: db.prepare('INSERT INTO sessions (token_hash, user_id, expires_at) VALUES (?,?,?)'),
     sess: db.prepare('SELECT u.id, u.username, s.expires_at FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ?'),
     delSess: db.prepare('DELETE FROM sessions WHERE token_hash = ?'),
+    delOtherSess: db.prepare('DELETE FROM sessions WHERE user_id = ? AND token_hash != ?'),
+    userById: db.prepare('SELECT * FROM users WHERE id = ?'),
+    setPw: db.prepare('UPDATE users SET pw_hash = ? WHERE id = ?'),
+    delUser: db.prepare('DELETE FROM users WHERE id = ?'),
     delExpired: db.prepare('DELETE FROM sessions WHERE expires_at <= ?'),
     insRes: db.prepare(`INSERT INTO drill_results (user_id, spot_id, spot_type, hero, hand_combo, action, solver_freqs, ev_loss, ms, lang, created_at)
       VALUES (?,?,?,?,?,?,?,?,?,?,?)`),
@@ -288,9 +293,10 @@ export function createApp({ db, webDist, now = Date.now, rateLimit = { max: 10, 
     if (path === '/api/login' && m === 'POST') {
       const b = await readJson(req);
       if (typeof b.username !== 'string' || typeof b.password !== 'string' ||
-          b.username.length > 64 || b.password.length > 128) throw new HttpError(401, 'invalid_credentials');
+          !USERNAME_RE.test(b.username) || b.password.length > 128) throw new HttpError(401, 'invalid_credentials'); // ASCII only: no Unicode case-fold aliases (e.g. Kelvin sign)
       const key = `login|${ip}|${b.username.toLowerCase()}`;
       limiter.hit(key);
+      ipLimiter.hit(`login|${ip}`);
       const u = q.userByName.get(b.username.toLowerCase());
       const ok = await verifyPassword(b.password, u ? u.pw_hash : await dummy);
       if (!u || !ok) throw new HttpError(401, 'invalid_credentials');
@@ -303,6 +309,29 @@ export function createApp({ db, webDist, now = Date.now, rateLimit = { max: 10, 
       const t = cookieOf(req);
       if (t) q.delSess.run(sha256(t));
       return send(res, 200, { ok: true }, { 'set-cookie': setCookie(req, '', 0) });
+    }
+
+    if (path === '/api/me' && m === 'DELETE') {
+      const u = requireUser(req);
+      const b = await readJson(req);
+      limiter.hit(`pw|${u.id}`);
+      if (typeof b.password !== 'string' || b.password.length > 128 ||
+          !(await verifyPassword(b.password, q.userById.get(u.id).pw_hash))) throw new HttpError(403, 'invalid_credentials');
+      q.delUser.run(u.id); // ON DELETE CASCADE removes sessions, drills, hands, decisions
+      return send(res, 200, { ok: true }, { 'set-cookie': setCookie(req, '', 0) });
+    }
+
+    if (path === '/api/me/password' && m === 'POST') {
+      const u = requireUser(req);
+      const b = await readJson(req);
+      limiter.hit(`pw|${u.id}`);
+      if (typeof b.newPassword !== 'string' || b.newPassword.length < 8 || b.newPassword.length > 128) throw new HttpError(400, 'invalid_password');
+      if (typeof b.currentPassword !== 'string' || b.currentPassword.length > 128 ||
+          !(await verifyPassword(b.currentPassword, q.userById.get(u.id).pw_hash))) throw new HttpError(403, 'invalid_credentials');
+      const hash = await hashPassword(b.newPassword);
+      inTx(() => { q.setPw.run(hash, u.id); q.delOtherSess.run(u.id, sha256(cookieOf(req))); });
+      limiter.reset(`pw|${u.id}`);
+      return send(res, 200, { ok: true });
     }
 
     if (path === '/api/me' && m === 'GET') return send(res, 200, { username: requireUser(req).username });
@@ -449,7 +478,7 @@ export function createApp({ db, webDist, now = Date.now, rateLimit = { max: 10, 
     } catch { send(res, 404, { error: 'not_found' }); }
   }
 
-  return createServer(async (req, res) => {
+  const server = createServer(async (req, res) => {
     try {
       const path = new URL(req.url, 'http://x').pathname;
       if (path.startsWith('/api/')) await api(req, res, path);
@@ -460,4 +489,7 @@ export function createApp({ db, webDist, now = Date.now, rateLimit = { max: 10, 
       send(res, 500, { error: 'internal' });
     }
   });
+  // Slowloris limits; keep-alive above typical proxy idle timeouts (Railway) to avoid 502s on reused sockets.
+  server.headersTimeout = 20000; server.requestTimeout = 60000; server.keepAliveTimeout = 65000;
+  return server;
 }

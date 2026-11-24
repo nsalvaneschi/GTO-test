@@ -46,6 +46,16 @@ fn yes() -> bool {
     true
 }
 
+const MAX_CHIPS: f32 = 1e9;
+const MAX_SIZES: usize = 16;
+const MAX_RAISE_CAP: u32 = 16;
+/// Upper bound on iterations per `step` call so one call cannot block the worker for hours.
+pub const MAX_STEP: u32 = 100_000;
+/// Budget in bytes from MiB without overflow.
+fn budget_bytes(mb: Option<u64>) -> u64 {
+    mb.unwrap_or(4096).saturating_mul(1 << 20)
+}
+
 fn card(s: &str) -> Result<u8, String> {
     let b = s.as_bytes();
     if b.len() != 2 || !"23456789TJQKA".contains(b[0] as char) || !"cdhs".contains(b[1] as char) {
@@ -60,17 +70,45 @@ impl JsonConfig {
         if !(3..=5).contains(&board.len()) || self.streets.len() != 6 - board.len() {
             return Err("need 3-5 board cards and one street config per remaining street".into());
         }
+        if board.iter().enumerate().any(|(i, c)| board[..i].contains(c)) {
+            return Err("duplicate board card".into());
+        }
+        for (i, s) in self.streets.iter().enumerate() {
+            let ok = |x: f32| x.is_finite() && x > 0.0 && x <= MAX_CHIPS;
+            if !ok(s.pot) || !ok(s.stack) {
+                return Err(format!("street {i}: pot and stack must be finite, > 0 and <= {MAX_CHIPS}"));
+            }
+            if s.sizes.len() > MAX_SIZES || s.sizes.iter().any(|&x| !(x.is_finite() && x > 0.0 && x <= MAX_CHIPS)) {
+                return Err(format!("street {i}: sizes must be at most {MAX_SIZES} finite values in (0, {MAX_CHIPS}]"));
+            }
+            if s.raise_cap > MAX_RAISE_CAP {
+                return Err(format!("street {i}: raise_cap must be <= {MAX_RAISE_CAP}"));
+            }
+        }
+        if let Some(k) = self.buckets {
+            if !(1..=H).contains(&k) {
+                return Err(format!("buckets must be in 1..={H}"));
+            }
+        }
         let cb = combos();
         let mut ranges: [Vec<f32>; 2] = [vec![], vec![]];
         for (i, r) in self.ranges.iter().enumerate() {
             ranges[i] = match r {
-                RangeJson::Dense(v) if v.len() == H => v.clone(),
+                RangeJson::Dense(v) if v.len() == H => {
+                    if v.iter().any(|&w| !(0.0..=1.0).contains(&w)) {
+                        return Err(format!("range {i}: weights must be in [0, 1]"));
+                    }
+                    v.clone()
+                }
                 RangeJson::Dense(_) => return Err(format!("range {i} must have {H} entries")),
                 RangeJson::Sparse(m) => {
                     let mut v = vec![0.0f32; H];
                     for (k, &w) in m {
-                        if k.len() != 4 {
+                        if k.len() != 4 || !k.is_ascii() {
                             return Err(format!("bad combo '{k}'"));
+                        }
+                        if !(0.0..=1.0).contains(&w) {
+                            return Err(format!("range {i}: weights must be in [0, 1]"));
                         }
                         let (a, b) = (card(&k[..2])?, card(&k[2..])?);
                         let key = (a.min(b), a.max(b));
@@ -94,15 +132,14 @@ pub struct Session {
 impl Session {
     pub fn new(config_json: &str) -> Result<Self, String> {
         let c: JsonConfig = serde_json::from_str(config_json).map_err(|e| e.to_string())?;
-        let budget = c.budget_mb.unwrap_or(4096) << 20;
-        Ok(Session { solver: StreetSolver::new(&c.to_street()?, budget)? })
+        Self::from_config(&c)
     }
     pub fn from_config(c: &JsonConfig) -> Result<Self, String> {
-        Ok(Session { solver: StreetSolver::new(&c.to_street()?, c.budget_mb.unwrap_or(4096) << 20)? })
+        Ok(Session { solver: StreetSolver::new(&c.to_street()?, budget_bytes(c.budget_mb))? })
     }
     /// Run `n` more iterations; returns exploitability in % of pot.
     pub fn step(&mut self, n: u32) -> f32 {
-        self.solver.solve(n);
+        self.solver.solve(n.min(MAX_STEP));
         self.solver.exploitability_pct()
     }
     pub fn iters(&self) -> u32 {
@@ -121,6 +158,7 @@ impl Session {
     }
     /// All nodes at depth <= `depth` below the root (chance nodes count as one level).
     pub fn dump(&self, depth: u32) -> Result<Vec<DumpNode>, String> {
+        let depth = depth.min(64);
         let mut out = vec![];
         self.dump_rec(&mut vec![], depth, &mut out)?;
         Ok(out)

@@ -35,6 +35,8 @@ pub struct StreetConfig {
 }
 
 const NOB: u32 = u32::MAX;
+/// Tree-size guard for the dry-run build: stops pathological configs before they eat time or memory.
+const MAX_NODES: usize = 8_000_000;
 
 struct BMap {
     map: Vec<u16>,
@@ -267,7 +269,7 @@ impl<'a> Builder<'a> {
         let mut done = bmask;
         let mut out = vec![];
         for card in 0..52u8 {
-            if done >> card & 1 == 1 {
+            if done >> card & 1 == 1 || self.n_nodes >= MAX_NODES {
                 continue;
             }
             let mut members: Vec<(u8, u8)> = vec![];
@@ -301,7 +303,7 @@ impl<'a> Builder<'a> {
         } else {
             ch.push(self.close(ctx, c[me]));
         }
-        if aggr < cap && c[o] < ctx.stack {
+        if aggr < cap && c[o] < ctx.stack && self.n_nodes < MAX_NODES {
             let pot_now = ctx.pot + c[0] + c[1];
             let call = c[o] - c[me];
             let mut targets: Vec<f32> = vec![];
@@ -369,6 +371,9 @@ fn estimate_keys(cfg: &StreetConfig, budget_bytes: u64) -> Result<(u64, Vec<Vec<
     let (cb, ps, hm) = build_tables();
     let mut b = make(cfg, true, &cb, &ps, &hm);
     run_build(&mut b);
+    if b.n_nodes >= MAX_NODES {
+        return Err(format!("tree too large (>= {MAX_NODES} nodes)"));
+    }
     let per = if cfg.compress { 4 } else { 8 };
     let bytes = (b.data_len * per + b.n_action * 8 + b.n_nodes * std::mem::size_of::<N>() + b.n_boards * H * 6) as u64;
     if bytes > budget_bytes {
@@ -511,6 +516,9 @@ impl StreetSolver {
             dead |= 1 << c;
         }
         s.norm = s.norm_rec(dead, cfg.streets.len() - 1);
+        if !(s.norm > 0.0 && s.norm.is_finite()) {
+            return Err("ranges have no compatible combos (empty, or fully blocked by the board)".into());
+        }
         Ok(s)
     }
 

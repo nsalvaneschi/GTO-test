@@ -81,11 +81,13 @@ const MIGRATIONS = [
 export function openDb(path) {
   if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
   const db = new DatabaseSync(path);
-  db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
+  db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;');
   migrate(db);
   return db;
 }
 
+// Migrations are forward-only and each runs in a transaction. BACK UP the volume's app.db (plus -wal/-shm,
+// or `VACUUM INTO 'backup.db'`) before deploying a release that adds a migration.
 export function migrate(db) {
   const v = db.prepare('PRAGMA user_version').get().user_version;
   for (let i = v; i < MIGRATIONS.length; i++) {
