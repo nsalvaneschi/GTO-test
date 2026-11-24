@@ -212,5 +212,17 @@
   "hh.data.confirm": "Sí, borrar",
   "hh.data.done": "Borrado: {hands, plural, one {# mano} other {# manos}}, {decisions, plural, one {# decisión} other {# decisiones}}.",
   "hh.solvingStage": "Los solves de turn y river pueden tardar hasta 20 segundos por mano; pulsa cancelar para detener.",
-  "hh.replay.inStreet": "En esta calle"
+  "hh.replay.inStreet": "En esta calle",
+  "theme.toggle": "Cambiar tema",
+  "nav.main": "Navegación principal",
+  "strategy.hint": "Pasa el cursor, toca o usa las flechas sobre una mano para ver su estrategia.",
+  "strategy.combos": "Combinaciones",
+  "strategy.ev": "EV (fichas)",
+  "strategy.range": "Totales del rango",
+  "strategy.hand": "Mano",
+  "seq.title": "Secuencia de acciones",
+  "seq.toAct": "por actuar",
+  "drill.panel": "Resultado",
+  "drill.hero": "Tu mano",
+  "a11y.matrix": "Matriz de estrategia, 13 por 13 manos"
 }
