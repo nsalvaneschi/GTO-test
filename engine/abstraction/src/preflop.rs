@@ -125,8 +125,10 @@ impl Default for PreflopConfig {
         PreflopConfig {
             stack: 100.0, open: 2.5, three_bet: 10.0, four_bet: 22.0, iso: 3.5, iso_three_bet: 8.75, iso_four_bet: 19.25,
             jam_frac: 0.4,
+            // Tuned with examples/prior_sweep: base unchanged; a steep penalty below 50% raw equity (not lower BB base)
+            // trims BB defence into the doc section 5 bands without pushing SB VPIP over 90%. Only trash (72o) hits the 0.4 clamp.
             r_base: [[1.00, 0.85], [1.02, 0.80], [1.00, 0.88], [0.98, 0.94]],
-            r_suited: 0.08, r_pair: 0.05, r_conn: 0.03, r_eq_pen: 0.6, r_eq_floor: 0.40, r_min: 0.4, r_max: 1.25,
+            r_suited: 0.08, r_pair: 0.05, r_conn: 0.03, r_eq_pen: 4.0, r_eq_floor: 0.50, r_min: 0.4, r_max: 1.25,
         }
     }
 }
