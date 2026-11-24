@@ -1,0 +1,11 @@
+SYNTHETIC - invented data, not a real hand history
+Poker Hand #HD1000000011: Omaha PL ($0.10/$0.20) - 2024/02/06 09:00:00
+Table 'SynthGG6' 6-max Seat #1 is the button
+Seat 1: Hero ($20 in chips)
+Seat 2: V1 ($20 in chips)
+Hero: posts small blind $0.10
+V1: posts big blind $0.20
+*** HOLE CARDS ***
+Dealt to Hero [Ah Kd Qc Jc]
+Hero: folds
+V1 collected $0.20 from pot

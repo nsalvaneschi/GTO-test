@@ -1,0 +1,5 @@
+SYNTHETIC - invented data, not a real hand history
+Full Tilt Poker Game #900000000012: Synth (6 max) - $0.25/$0.50 - No Limit Hold'em - 12:00:00 ET - 2012/01/20
+Table Synth - $0.25/$0.50 - No Limit Hold'em
+Seat 1: Hero ($50)
+Seat 2: V1 ($50)

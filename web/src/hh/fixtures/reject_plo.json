@@ -1,0 +1,10 @@
+[
+  {
+    "ok": false,
+    "index": 0,
+    "reason": "unsupported_game",
+    "site": "ggpoker",
+    "hand_id": "HD1000000011",
+    "line": 1
+  }
+]

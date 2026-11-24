@@ -1,0 +1,198 @@
+[
+  {
+    "ok": true,
+    "index": 0,
+    "hand": {
+      "site": "pokerstars",
+      "hand_id": "900000000002",
+      "played_at": "2024-01-15T20:21:02",
+      "stakes": {
+        "sb": 0.25,
+        "bb": 0.5
+      },
+      "button": 4,
+      "hero": 3,
+      "seats": [
+        {
+          "seat": 1,
+          "name": "V1",
+          "name_hash": null,
+          "stack": 100,
+          "is_hero": false
+        },
+        {
+          "seat": 3,
+          "name": "Hero",
+          "name_hash": null,
+          "stack": 120,
+          "is_hero": true
+        },
+        {
+          "seat": 4,
+          "name": "V2",
+          "name_hash": null,
+          "stack": 80,
+          "is_hero": false
+        },
+        {
+          "seat": 5,
+          "name": "V3",
+          "name_hash": null,
+          "stack": 100,
+          "is_hero": false
+        },
+        {
+          "seat": 6,
+          "name": "V4",
+          "name_hash": null,
+          "stack": 100,
+          "is_hero": false
+        }
+      ],
+      "hero_cards": [
+        "Qs",
+        "Qh"
+      ],
+      "board": [
+        "Kd",
+        "9s",
+        "4h"
+      ],
+      "blinds": [
+        {
+          "seat": 5,
+          "kind": "sb",
+          "amount": 0.5
+        },
+        {
+          "seat": 6,
+          "kind": "bb",
+          "amount": 1
+        }
+      ],
+      "actions": [
+        {
+          "street": "preflop",
+          "seat": 1,
+          "kind": "fold",
+          "amount_to": null,
+          "allin": false
+        },
+        {
+          "street": "preflop",
+          "seat": 3,
+          "kind": "raise",
+          "amount_to": 4,
+          "allin": false
+        },
+        {
+          "street": "preflop",
+          "seat": 4,
+          "kind": "call",
+          "amount_to": 4,
+          "allin": false
+        },
+        {
+          "street": "preflop",
+          "seat": 5,
+          "kind": "raise",
+          "amount_to": 14,
+          "allin": false
+        },
+        {
+          "street": "preflop",
+          "seat": 6,
+          "kind": "fold",
+          "amount_to": null,
+          "allin": false
+        },
+        {
+          "street": "preflop",
+          "seat": 3,
+          "kind": "call",
+          "amount_to": 14,
+          "allin": false
+        },
+        {
+          "street": "preflop",
+          "seat": 4,
+          "kind": "fold",
+          "amount_to": null,
+          "allin": false
+        },
+        {
+          "street": "flop",
+          "seat": 5,
+          "kind": "check",
+          "amount_to": null,
+          "allin": false
+        },
+        {
+          "street": "flop",
+          "seat": 3,
+          "kind": "bet",
+          "amount_to": 10,
+          "allin": false
+        },
+        {
+          "street": "flop",
+          "seat": 5,
+          "kind": "fold",
+          "amount_to": null,
+          "allin": false
+        }
+      ],
+      "pot_by_street": [
+        {
+          "street": "preflop",
+          "pot": 1.5,
+          "stacks": {
+            "1": 100,
+            "3": 120,
+            "4": 80,
+            "5": 99.5,
+            "6": 99
+          }
+        },
+        {
+          "street": "flop",
+          "pot": 33,
+          "stacks": {
+            "1": 100,
+            "3": 106,
+            "4": 76,
+            "5": 86,
+            "6": 99
+          }
+        }
+      ],
+      "returned": [
+        {
+          "seat": 3,
+          "amount": 10
+        }
+      ],
+      "contributions": {
+        "1": 0,
+        "3": 14,
+        "4": 4,
+        "5": 14,
+        "6": 1
+      },
+      "final_pot": 33,
+      "collected": {
+        "3": 33
+      },
+      "final_stacks": {
+        "1": 100,
+        "3": 139,
+        "4": 76,
+        "5": 86,
+        "6": 99
+      },
+      "went_to_showdown": false,
+      "showdown": []
+    },
+    "warnings": []
+  }
+]

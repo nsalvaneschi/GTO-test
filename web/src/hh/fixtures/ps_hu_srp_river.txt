@@ -1,0 +1,30 @@
+SYNTHETIC - invented data, not a real hand history
+PokerStars Hand #900000000001:  Hold'em No Limit ($0.25/$0.50 USD) - 2024/01/15 20:15:30 ET
+Table 'Synth I' 2-max Seat #1 is the button
+Seat 1: Hero ($50 in chips)
+Seat 2: V1 ($50 in chips)
+Hero: posts small blind $0.25
+V1: posts big blind $0.50
+*** HOLE CARDS ***
+Dealt to Hero [Ac Kd]
+Hero: raises $1 to $1.50
+V1: calls $1
+*** FLOP *** [Ah 7d 2c]
+V1: checks
+Hero: bets $2
+V1: calls $2
+*** TURN *** [Ah 7d 2c] [Kc]
+V1: checks
+Hero: checks
+*** RIVER *** [Ah 7d 2c Kc] [3s]
+V1: bets $4
+Hero: calls $4
+*** SHOW DOWN ***
+V1: shows [Qd Jd] (high card Ace)
+Hero: shows [Ac Kd] (two pair, Aces and Kings)
+Hero collected $15 from pot
+*** SUMMARY ***
+Total pot $15 | Rake $0
+Board [Ah 7d 2c Kc 3s]
+Seat 1: Hero (button) (small blind) showed [Ac Kd] and won ($15)
+Seat 2: V1 (big blind) showed [Qd Jd] and lost

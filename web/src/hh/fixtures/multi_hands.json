@@ -1,0 +1,369 @@
+[
+  {
+    "ok": true,
+    "index": 0,
+    "hand": {
+      "site": "pokerstars",
+      "hand_id": "900000000006",
+      "played_at": "2024-01-17T08:00:00",
+      "stakes": {
+        "sb": 0.25,
+        "bb": 0.5
+      },
+      "button": 1,
+      "hero": 1,
+      "seats": [
+        {
+          "seat": 1,
+          "name": "Hero",
+          "name_hash": null,
+          "stack": 100,
+          "is_hero": true
+        },
+        {
+          "seat": 2,
+          "name": "V1",
+          "name_hash": null,
+          "stack": 100,
+          "is_hero": false
+        }
+      ],
+      "hero_cards": [
+        "7h",
+        "2c"
+      ],
+      "board": [],
+      "blinds": [
+        {
+          "seat": 1,
+          "kind": "sb",
+          "amount": 0.5
+        },
+        {
+          "seat": 2,
+          "kind": "bb",
+          "amount": 1
+        }
+      ],
+      "actions": [
+        {
+          "street": "preflop",
+          "seat": 1,
+          "kind": "raise",
+          "amount_to": 3,
+          "allin": false
+        },
+        {
+          "street": "preflop",
+          "seat": 2,
+          "kind": "fold",
+          "amount_to": null,
+          "allin": false
+        }
+      ],
+      "pot_by_street": [
+        {
+          "street": "preflop",
+          "pot": 1.5,
+          "stacks": {
+            "1": 99.5,
+            "2": 99
+          }
+        }
+      ],
+      "returned": [
+        {
+          "seat": 1,
+          "amount": 2
+        }
+      ],
+      "contributions": {
+        "1": 1,
+        "2": 1
+      },
+      "final_pot": 2,
+      "collected": {
+        "1": 2
+      },
+      "final_stacks": {
+        "1": 101,
+        "2": 99
+      },
+      "went_to_showdown": false,
+      "showdown": []
+    },
+    "warnings": []
+  },
+  {
+    "ok": true,
+    "index": 1,
+    "hand": {
+      "site": "pokerstars",
+      "hand_id": "900000000007",
+      "played_at": "2024-01-17T08:01:00",
+      "stakes": {
+        "sb": 0.25,
+        "bb": 0.5
+      },
+      "button": 2,
+      "hero": 1,
+      "seats": [
+        {
+          "seat": 1,
+          "name": "Hero",
+          "name_hash": null,
+          "stack": 101,
+          "is_hero": true
+        },
+        {
+          "seat": 2,
+          "name": "V1",
+          "name_hash": null,
+          "stack": 99,
+          "is_hero": false
+        }
+      ],
+      "hero_cards": [
+        "8s",
+        "3d"
+      ],
+      "board": [],
+      "blinds": [
+        {
+          "seat": 2,
+          "kind": "sb",
+          "amount": 0.5
+        },
+        {
+          "seat": 1,
+          "kind": "bb",
+          "amount": 1
+        }
+      ],
+      "actions": [
+        {
+          "street": "preflop",
+          "seat": 2,
+          "kind": "raise",
+          "amount_to": 3,
+          "allin": false
+        },
+        {
+          "street": "preflop",
+          "seat": 1,
+          "kind": "fold",
+          "amount_to": null,
+          "allin": false
+        }
+      ],
+      "pot_by_street": [
+        {
+          "street": "preflop",
+          "pot": 1.5,
+          "stacks": {
+            "1": 100,
+            "2": 98.5
+          }
+        }
+      ],
+      "returned": [
+        {
+          "seat": 2,
+          "amount": 2
+        }
+      ],
+      "contributions": {
+        "1": 1,
+        "2": 1
+      },
+      "final_pot": 2,
+      "collected": {
+        "2": 2
+      },
+      "final_stacks": {
+        "1": 100,
+        "2": 100
+      },
+      "went_to_showdown": false,
+      "showdown": []
+    },
+    "warnings": []
+  },
+  {
+    "ok": true,
+    "index": 2,
+    "hand": {
+      "site": "ggpoker",
+      "hand_id": "HD1000000009",
+      "played_at": "2024-01-17T08:02:00",
+      "stakes": {
+        "sb": 0.1,
+        "bb": 0.2
+      },
+      "button": 1,
+      "hero": 1,
+      "seats": [
+        {
+          "seat": 1,
+          "name": "Hero",
+          "name_hash": null,
+          "stack": 100,
+          "is_hero": true
+        },
+        {
+          "seat": 2,
+          "name": "V1",
+          "name_hash": null,
+          "stack": 100,
+          "is_hero": false
+        }
+      ],
+      "hero_cards": [
+        "Td",
+        "9d"
+      ],
+      "board": [
+        "Ac",
+        "6h",
+        "2s",
+        "Kd",
+        "4c"
+      ],
+      "blinds": [
+        {
+          "seat": 1,
+          "kind": "sb",
+          "amount": 0.5
+        },
+        {
+          "seat": 2,
+          "kind": "bb",
+          "amount": 1
+        }
+      ],
+      "actions": [
+        {
+          "street": "preflop",
+          "seat": 1,
+          "kind": "call",
+          "amount_to": 1,
+          "allin": false
+        },
+        {
+          "street": "preflop",
+          "seat": 2,
+          "kind": "check",
+          "amount_to": null,
+          "allin": false
+        },
+        {
+          "street": "flop",
+          "seat": 2,
+          "kind": "check",
+          "amount_to": null,
+          "allin": false
+        },
+        {
+          "street": "flop",
+          "seat": 1,
+          "kind": "check",
+          "amount_to": null,
+          "allin": false
+        },
+        {
+          "street": "turn",
+          "seat": 2,
+          "kind": "check",
+          "amount_to": null,
+          "allin": false
+        },
+        {
+          "street": "turn",
+          "seat": 1,
+          "kind": "check",
+          "amount_to": null,
+          "allin": false
+        },
+        {
+          "street": "river",
+          "seat": 2,
+          "kind": "check",
+          "amount_to": null,
+          "allin": false
+        },
+        {
+          "street": "river",
+          "seat": 1,
+          "kind": "check",
+          "amount_to": null,
+          "allin": false
+        }
+      ],
+      "pot_by_street": [
+        {
+          "street": "preflop",
+          "pot": 1.5,
+          "stacks": {
+            "1": 99.5,
+            "2": 99
+          }
+        },
+        {
+          "street": "flop",
+          "pot": 2,
+          "stacks": {
+            "1": 99,
+            "2": 99
+          }
+        },
+        {
+          "street": "turn",
+          "pot": 2,
+          "stacks": {
+            "1": 99,
+            "2": 99
+          }
+        },
+        {
+          "street": "river",
+          "pot": 2,
+          "stacks": {
+            "1": 99,
+            "2": 99
+          }
+        }
+      ],
+      "returned": [],
+      "contributions": {
+        "1": 1,
+        "2": 1
+      },
+      "final_pot": 2,
+      "collected": {
+        "2": 2
+      },
+      "final_stacks": {
+        "1": 99,
+        "2": 101
+      },
+      "went_to_showdown": true,
+      "showdown": [
+        {
+          "seat": 2,
+          "cards": [
+            "Qh",
+            "Qs"
+          ]
+        },
+        {
+          "seat": 1,
+          "cards": [
+            "Td",
+            "9d"
+          ]
+        }
+      ]
+    },
+    "warnings": []
+  }
+]

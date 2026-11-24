@@ -1,0 +1,56 @@
+SYNTHETIC - invented data, not a real hand history
+PokerStars Hand #900000000006:  Hold'em No Limit ($0.25/$0.50 USD) - 2024/01/17 08:00:00 ET
+Table 'Synth VI' 2-max Seat #1 is the button
+Seat 1: Hero ($50 in chips)
+Seat 2: V1 ($50 in chips)
+Hero: posts small blind $0.25
+V1: posts big blind $0.50
+*** HOLE CARDS ***
+Dealt to Hero [7h 2c]
+Hero: raises $1 to $1.50
+V1: folds
+Uncalled bet ($1) returned to Hero
+Hero collected $1 from pot
+*** SUMMARY ***
+Total pot $1 | Rake $0
+
+PokerStars Hand #900000000007:  Hold'em No Limit ($0.25/$0.50 USD) - 2024/01/17 08:01:00 ET
+Table 'Synth VI' 2-max Seat #2 is the button
+Seat 1: Hero ($50.50 in chips)
+Seat 2: V1 ($49.50 in chips)
+V1: posts small blind $0.25
+Hero: posts big blind $0.50
+*** HOLE CARDS ***
+Dealt to Hero [8s 3d]
+V1: raises $1 to $1.50
+Hero: folds
+Uncalled bet ($1) returned to V1
+V1 collected $1 from pot
+*** SUMMARY ***
+Total pot $1 | Rake $0
+
+Poker Hand #HD1000000009: Hold'em No Limit ($0.10/$0.20) - 2024/01/17 08:02:00
+Table 'SynthGG4' 2-max Seat #1 is the button
+Seat 1: Hero ($20 in chips)
+Seat 2: V1 ($20 in chips)
+Hero: posts small blind $0.10
+V1: posts big blind $0.20
+*** HOLE CARDS ***
+Dealt to Hero [Td 9d]
+Hero: calls $0.10
+V1: checks
+*** FLOP *** [Ac 6h 2s]
+V1: checks
+Hero: checks
+*** TURN *** [Ac 6h 2s] [Kd]
+V1: checks
+Hero: checks
+*** RIVER *** [Ac 6h 2s Kd] [4c]
+V1: checks
+Hero: checks
+*** SHOW DOWN ***
+V1: shows [Qh Qs]
+Hero: shows [Td 9d]
+V1 collected $0.40 from pot
+*** SUMMARY ***
+Total pot $0.40 | Rake $0

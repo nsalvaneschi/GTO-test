@@ -1,0 +1,149 @@
+[
+  {
+    "ok": true,
+    "index": 0,
+    "hand": {
+      "site": "pokerstars",
+      "hand_id": "900000000003",
+      "played_at": "2024-01-16T09:00:00",
+      "stakes": {
+        "sb": 0.25,
+        "bb": 0.5
+      },
+      "button": 1,
+      "hero": 2,
+      "seats": [
+        {
+          "seat": 1,
+          "name": "V1",
+          "name_hash": null,
+          "stack": 40,
+          "is_hero": false
+        },
+        {
+          "seat": 2,
+          "name": "Hero",
+          "name_hash": null,
+          "stack": 100,
+          "is_hero": true
+        }
+      ],
+      "hero_cards": [
+        "Kh",
+        "Kd"
+      ],
+      "board": [
+        "2h",
+        "5d",
+        "9c",
+        "Js",
+        "3s"
+      ],
+      "blinds": [
+        {
+          "seat": 1,
+          "kind": "sb",
+          "amount": 0.5
+        },
+        {
+          "seat": 2,
+          "kind": "bb",
+          "amount": 1
+        }
+      ],
+      "actions": [
+        {
+          "street": "preflop",
+          "seat": 1,
+          "kind": "raise",
+          "amount_to": 4,
+          "allin": false
+        },
+        {
+          "street": "preflop",
+          "seat": 2,
+          "kind": "allin",
+          "amount_to": 100,
+          "allin": true
+        },
+        {
+          "street": "preflop",
+          "seat": 1,
+          "kind": "call",
+          "amount_to": 40,
+          "allin": true
+        }
+      ],
+      "pot_by_street": [
+        {
+          "street": "preflop",
+          "pot": 1.5,
+          "stacks": {
+            "1": 39.5,
+            "2": 99
+          }
+        },
+        {
+          "street": "flop",
+          "pot": 80,
+          "stacks": {
+            "1": 0,
+            "2": 60
+          }
+        },
+        {
+          "street": "turn",
+          "pot": 80,
+          "stacks": {
+            "1": 0,
+            "2": 60
+          }
+        },
+        {
+          "street": "river",
+          "pot": 80,
+          "stacks": {
+            "1": 0,
+            "2": 60
+          }
+        }
+      ],
+      "returned": [
+        {
+          "seat": 2,
+          "amount": 60
+        }
+      ],
+      "contributions": {
+        "1": 40,
+        "2": 40
+      },
+      "final_pot": 80,
+      "collected": {
+        "1": 80
+      },
+      "final_stacks": {
+        "1": 80,
+        "2": 60
+      },
+      "went_to_showdown": true,
+      "showdown": [
+        {
+          "seat": 1,
+          "cards": [
+            "Ac",
+            "Ad"
+          ]
+        },
+        {
+          "seat": 2,
+          "cards": [
+            "Kh",
+            "Kd"
+          ]
+        }
+      ]
+    },
+    "warnings": []
+  }
+]

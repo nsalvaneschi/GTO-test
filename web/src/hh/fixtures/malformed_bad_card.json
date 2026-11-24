@@ -1,0 +1,10 @@
+[
+  {
+    "ok": false,
+    "index": 0,
+    "reason": "bad_card",
+    "site": "ggpoker",
+    "hand_id": "HD1000000010",
+    "line": 8
+  }
+]

@@ -1,0 +1,28 @@
+SYNTHETIC - invented data, not a real hand history
+Poker Hand #HD1000000003: Hold'em No Limit ($0.10/$0.20) - 2024/02/04 12:00:00
+Table 'SynthGG3' 3-max Seat #1 is the button
+Seat 1: V1 ($10 in chips)
+Seat 2: V2 ($4 in chips)
+Seat 3: Hero ($25 in chips)
+V1: posts the ante $0.05
+V2: posts the ante $0.05
+Hero: posts the ante $0.05
+V2: posts small blind $0.10
+Hero: posts big blind $0.20
+*** HOLE CARDS ***
+Dealt to Hero [Ks Kc]
+V1: raises $1.80 to $2.00
+V2: raises $1.95 to $3.95 and is all-in
+Hero: raises $6.00 to $9.95
+V1: calls $7.95 and is all-in
+*** FLOP *** [Kd 8h 3s]
+*** TURN *** [Kd 8h 3s] [2c]
+*** RIVER *** [Kd 8h 3s 2c] [9d]
+*** SHOW DOWN ***
+V2: shows [Ah Ad]
+V1: shows [Qc Qd]
+Hero: shows [Ks Kc]
+Hero collected $12.00 from main pot
+Hero collected $12.00 from side pot-1
+*** SUMMARY ***
+Total pot $24.00 | Rake $0

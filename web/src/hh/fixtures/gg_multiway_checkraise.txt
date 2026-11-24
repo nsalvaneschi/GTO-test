@@ -1,0 +1,31 @@
+SYNTHETIC - invented data, not a real hand history
+Poker Hand #HD1000000002: Hold'em No Limit ($0.10/$0.20) - 2024/02/03 18:05:44
+Table 'SynthGG2' 6-max Seat #7 is the button
+Seat 2: Hero ($20 in chips)
+Seat 4: V1 ($25 in chips)
+Seat 7: V2 ($18 in chips)
+Hero: posts small blind $0.10
+V1: posts big blind $0.20
+*** HOLE CARDS ***
+Dealt to Hero [Js 9s]
+Dealt to V1
+Dealt to V2
+V2: raises $0.40 to $0.60
+Hero: calls $0.50
+V1: calls $0.40
+*** FLOP *** [Ts 8s 3c]
+Hero: checks
+V1: bets $0.80
+V2: folds
+Hero: raises $2.40 to $3.20
+V1: calls $2.40
+*** TURN *** [Ts 8s 3c] [Ad]
+Hero: checks
+V1: checks
+*** RIVER *** [Ts 8s 3c Ad] [5h]
+Hero: bets $4
+V1: folds
+Uncalled bet ($4) returned to Hero
+Hero collected $8.20 from pot
+*** SUMMARY ***
+Total pot $8.20 | Rake $0

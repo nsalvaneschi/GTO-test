@@ -1,0 +1,11 @@
+SYNTHETIC - invented data, not a real hand history
+PokerStars Hand #900000000010: Tournament #9000001, $1.00+$0.10 USD Hold'em No Limit - Level I (10/20) - 2024/01/19 12:00:00 ET
+Table '9000001 1' 9-max Seat #1 is the button
+Seat 1: Hero (1500 in chips)
+Seat 2: V1 (1500 in chips)
+Hero: posts small blind 10
+V1: posts big blind 20
+*** HOLE CARDS ***
+Dealt to Hero [Ac Kd]
+Hero: folds
+V1 collected 30 from pot

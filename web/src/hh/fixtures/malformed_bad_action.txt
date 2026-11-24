@@ -1,0 +1,12 @@
+SYNTHETIC - invented data, not a real hand history
+PokerStars Hand #900000000009:  Hold'em No Limit ($0.25/$0.50 USD) - 2024/01/18 08:05:00 ET
+Table 'Synth VIII' 2-max Seat #1 is the button
+Seat 1: Hero ($50 in chips)
+Seat 2: V1 ($50 in chips)
+Hero: posts small blind $0.25
+V1: posts big blind $0.50
+*** HOLE CARDS ***
+Dealt to Hero [Ac Kd]
+Hero: wiggles $3
+V1: folds
+Hero collected $0.75 from pot

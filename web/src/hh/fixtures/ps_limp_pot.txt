@@ -1,0 +1,35 @@
+SYNTHETIC - invented data, not a real hand history
+PokerStars Hand #900000000004:  Hold'em No Limit ($0.25/$0.50 USD) - 2024/01/16 10:10:10 ET
+Table 'Synth IV' 6-max Seat #5 is the button
+Seat 1: V1 ($50 in chips)
+Seat 2: V2 ($50 in chips)
+Seat 3: Hero ($50 in chips)
+Seat 5: V3 ($50 in chips)
+V1: posts small blind $0.25
+V2: posts big blind $0.50
+*** HOLE CARDS ***
+Dealt to Hero [Kc Jc]
+Hero: calls $0.50
+V3: calls $0.50
+V1: calls $0.25
+V2: checks
+*** FLOP *** [6c 6d Kh]
+V1: checks
+V2: checks
+Hero: checks
+V3: bets $1
+V1: folds
+V2: folds
+Hero: calls $1
+*** TURN *** [6c 6d Kh] [2s]
+Hero: checks
+V3: checks
+*** RIVER *** [6c 6d Kh 2s] [Qs]
+Hero: checks
+V3: checks
+*** SHOW DOWN ***
+Hero: shows [Kc Jc] (two pair, Kings and Sixes)
+V3: shows [Ah 5h] (a pair of Sixes)
+Hero collected $4 from pot
+*** SUMMARY ***
+Total pot $4 | Rake $0

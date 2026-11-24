@@ -1,0 +1,22 @@
+SYNTHETIC - invented data, not a real hand history
+PokerStars Hand #900000000003:  Hold'em No Limit ($0.25/$0.50 USD) - 2024/01/16 09:00:00 ET
+Table 'Synth III' 2-max Seat #1 is the button
+Seat 1: V1 ($20 in chips)
+Seat 2: Hero ($50 in chips)
+V1: posts small blind $0.25
+Hero: posts big blind $0.50
+*** HOLE CARDS ***
+Dealt to Hero [Kh Kd]
+V1: raises $1.25 to $2
+Hero: raises $48 to $50 and is all-in
+V1: calls $18 and is all-in
+Uncalled bet ($30) returned to Hero
+*** FLOP *** [2h 5d 9c]
+*** TURN *** [2h 5d 9c] [Js]
+*** RIVER *** [2h 5d 9c Js] [3s]
+*** SHOW DOWN ***
+V1: shows [Ac Ad] (a pair of Aces)
+Hero: shows [Kh Kd] (a pair of Kings)
+V1 collected $40 from pot
+*** SUMMARY ***
+Total pot $40 | Rake $0
