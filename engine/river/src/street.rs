@@ -962,14 +962,21 @@ impl StreetSolver {
                 let mut s = vec![0.0f32; n * w];
                 self.sum.load(nd.data_off, id, &mut s);
                 let q = nd.player as usize;
+                let kids = &self.children[nd.child_off as usize..nd.child_off as usize + n];
+                let action_ev: Vec<f32> = kids.iter().flat_map(|&k| self.br(k as usize, q, &reach[1 - q], false)).collect();
+                let opp = &reach[1 - q];
+                let mut cs = [0.0f32; 52];
+                let mut tot = 0.0;
+                for (&(a, b), &o) in self.combos.iter().zip(opp) { cs[a as usize] += o; cs[b as usize] += o; tot += o; }
+                let opp_mass: Vec<f32> = self.combos.iter().zip(opp).map(|(&(a, b), &o)| tot - cs[a as usize] - cs[b as usize] + o).collect();
                 NodeView { kind: "action".to_string(), player: nd.player, n, cards: vec![], strategy: self.expand(nd, normalize(&s, n, w)),
-                    ev: self.br(id, q, &reach[1 - q], false), range: reach[q].clone() }
+                    ev: self.br(id, q, &reach[1 - q], false), range: reach[q].clone(), action_ev, opp_mass }
             }
             K::Chance => NodeView { kind: "chance".to_string(), player: 0, n: 0,
                 cards: self.chances[nd.aux as usize].iter().map(|o| o.card).collect(),
-                strategy: vec![], ev: vec![], range: vec![] },
-            K::Fold => NodeView { kind: "fold".to_string(), player: nd.player, n: 0, cards: vec![], strategy: vec![], ev: vec![], range: vec![] },
-            K::Showdown => NodeView { kind: "showdown".to_string(), player: 0, n: 0, cards: vec![], strategy: vec![], ev: vec![], range: vec![] },
+                strategy: vec![], ev: vec![], range: vec![], action_ev: vec![], opp_mass: vec![] },
+            K::Fold => NodeView { kind: "fold".to_string(), player: nd.player, n: 0, cards: vec![], strategy: vec![], ev: vec![], range: vec![], action_ev: vec![], opp_mass: vec![] },
+            K::Showdown => NodeView { kind: "showdown".to_string(), player: 0, n: 0, cards: vec![], strategy: vec![], ev: vec![], range: vec![], action_ev: vec![], opp_mass: vec![] },
         })
     }
 }
@@ -985,4 +992,10 @@ pub struct NodeView {
     pub ev: Vec<f32>,
     /// Acting player's reach per combo.
     pub range: Vec<f32>,
+    /// Action nodes: n * H, action-major per-combo value (raw chips, same convention as `ev`) of each action.
+    #[serde(default)]
+    pub action_ev: Vec<f32>,
+    /// Action nodes: opponent reach not blocked by each combo; divide `action_ev` by it for chips.
+    #[serde(default)]
+    pub opp_mass: Vec<f32>,
 }

@@ -14,3 +14,9 @@
 | river | river | river |
 | exploitability | explotabilidad | sfruttabilità |
 | OOP / IP | OOP / IP | OOP / IP |
+| drill | práctica | esercizio |
+| hand | mano | mano |
+| accuracy | precisión | precisione |
+| streak | racha | serie |
+| EV loss | pérdida de EV | perdita di EV |
+| log in / register / log out | iniciar sesión / registrarse / cerrar sesión | accedi / registrati / esci |

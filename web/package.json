@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "test": "vitest run",
-    "test:browser": "node tests/browser.cjs"
+    "test:browser": "node tests/browser.cjs",
+    "test:e2e": "node tests/e2e.cjs"
   },
   "devDependencies": {
     "typescript": "^7.0.2",
