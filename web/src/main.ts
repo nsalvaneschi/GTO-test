@@ -1,7 +1,7 @@
 import { t, fmt, locales, type Lang, type Key } from './i18n';
 import { parseRange, presets, R } from './ranges';
 import { api, ApiError, type Progress } from './api';
-import { combos, comboName, cardName, randomBoard, sampleHand, freqsFor, evLossPct, isCorrect, spotId, SUITS, RANKS } from './drill';
+import { combos, comboName, cardName, randomBoard, freqsFor, evLossPct, isCorrect, spotId, samplePath, nodeType, isFacing, type Step, type NodeType, SUITS, RANKS } from './drill';
 
 // Bet sizes sent to the engine; labels derive from these (NodeView has no size info, so this assumes none are merged/dropped, e.g. at all-in).
 const sizes = [0.5, 1];
@@ -16,7 +16,7 @@ let user: string | null = null;
 let authErr = '';
 let progress: Progress | 'loading' | null = null;
 const drill = { phase: 'idle' as 'idle' | 'solving' | 'ask' | 'reveal', board: '', oop: '', ip: '', view: null as View | null, h: 0,
-  freqs: [] as number[], chosen: -1, evLoss: 0, t0: 0, correct: 0, total: 0, saveErr: '' };
+  path: [] as number[], steps: [] as Step[], freqs: [] as number[], chosen: -1, evLoss: 0, t0: 0, correct: 0, total: 0, saveErr: '' };
 
 let lang: Lang = (new URLSearchParams(location.search).get('lang') as Lang) in locales
   ? (new URLSearchParams(location.search).get('lang') as Lang) : 'en';
@@ -34,15 +34,17 @@ worker.onmessage = (e) => {
   const m = e.data;
   if (m.type === 'progress') { expl = m.expl; iters = m.iters; if (owner === 'solver') { if (!view) query([]); renderStatus(); } }
   else if (m.type === 'done') {
-    if (owner === 'drill') { query([]); return; }
+    if (owner === 'drill') { dealNode(); return; }
     solving = false; expl = m.expl; iters = m.iters; query(path); render();
   }
   else if (m.type === 'node') {
-    if (owner === 'drill') { if (drill.phase === 'solving') dealHand(m.view); return; }
+    if (owner === 'drill') { pend.get(JSON.stringify(m.path))?.(m.view); return; }
     view = m.view; renderGrid();
   }
   else if (m.type === 'error') { solving = false; if (owner === 'drill') drill.phase = 'idle'; err = m.message; render(); }
 };
+const pend = new Map<string, (v: View) => void>();
+const queryAsync = (p: number[]) => new Promise<View>((res) => { pend.set(JSON.stringify(p), res); worker.postMessage({ type: 'query', path: p }); });
 const query = (p: number[]) => worker.postMessage({ type: 'query', path: p });
 
 function actions(v: View, fac: boolean): { key: Key; vars?: Record<string, string | number>; color: string }[] {
@@ -160,9 +162,15 @@ function startDrill() {
   render();
 }
 
-function dealHand(v: View) {
-  drill.view = v; drill.h = sampleHand(v.range); drill.phase = 'ask'; drill.t0 = Date.now();
+async function dealNode() {
+  const s = await samplePath(queryAsync, parseBoard(drill.board));
+  Object.assign(drill, { view: s.view, h: s.h, path: s.path, steps: s.steps, phase: 'ask', t0: Date.now() });
   if (screen === 'drill') render();
+}
+
+function stepLabel(s: Step): string {
+  const vars = s.size >= 0 ? { size: fmt(sizes[s.size] ?? 0, lang, { style: 'percent' }) } : undefined;
+  return `${tr(('player.' + s.player) as Key)}: ${tr(('action.' + s.kind) as Key, vars)}`;
 }
 
 function answer(i: number) {
@@ -174,7 +182,7 @@ function answer(i: number) {
   drill.total++; if (isCorrect(drill.freqs, i)) drill.correct++;
   drill.phase = 'reveal'; drill.saveErr = '';
   render();
-  api.postResult({ spotId: spotId(drill.board, drill.oop, drill.ip), hero: v.player, handCombo: comboName(drill.h), action: i,
+  api.postResult({ spotId: spotId(drill.board, drill.oop, drill.ip, nodeType(drill.steps), drill.path), hero: v.player, handCombo: comboName(drill.h), action: i,
     solverFreqs: drill.freqs, evLoss: drill.evLoss, ms, lang }).catch((e) => {
     if (e instanceof ApiError && e.status === 401) { handleApiErr(e); return; }
     drill.saveErr = errText(codeOf(e)); const el = document.getElementById('save-err'); if (el) el.textContent = drill.saveErr;
@@ -190,9 +198,11 @@ function renderDrill() {
   if (drill.phase === 'solving') { el.innerHTML = `<p id="drill-solving">${tr('drill.solving')}</p>${sessionLine()}`; return; }
   const v = drill.view!;
   const [c1, c2] = combos[drill.h];
-  const as = actions(v, false);
+  const as = actions(v, isFacing(drill.steps));
+  const nt = nodeType(drill.steps);
   const head = `<div>${tr('board')}: <span id="board-cards">${parseBoard(drill.board).map(cardHtml).join('')}</span></div>
     <div style="margin:6px 0">${tr('toAct', { player: tr(('player.' + v.player) as Key) })} · ${tr('pot')}: ${fmt(DRILL.pot, lang)} · ${tr('stack')}: ${fmt(DRILL.stack, lang)} · ${tr('oop')}: ${tr(('preset.' + drill.oop) as Key)} · ${tr('ip')}: ${tr(('preset.' + drill.ip) as Key)}</div>
+    <div id="history" data-node="${nt}" data-depth="${drill.steps.length}" style="margin:6px 0">${tr(('progress.spot.river:' + nt) as Key)} · ${tr('drill.history')}: ${drill.steps.length ? drill.steps.map(stepLabel).join(' → ') : tr('drill.noHistory')}</div>
     <div style="margin:6px 0">${tr('drill.yourHand')}: <span id="hand" data-combo="${comboName(drill.h)}">${[c2, c1].sort((a, b) => (b >> 2) - (a >> 2)).map(cardHtml).join('')}</span></div>`;
   if (drill.phase === 'ask') {
     el.innerHTML = `${head}<div>${tr('drill.choose')}</div><div id="acts">${as.map((a, i) => `<button class="a" data-a="${i}" style="border-left:6px solid ${a.color}">${tr(a.key, a.vars)}</button>`).join('')}</div>${sessionLine()}`;

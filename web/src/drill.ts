@@ -52,4 +52,53 @@ export function evLossPct(actionEv: ArrayLike<number>, oppMass: ArrayLike<number
 /** Same rule as the server: correct when the solver plays the chosen action >= 10% of the time. */
 export const isCorrect = (freqs: number[], action: number) => freqs[action] >= 0.1;
 
-export const spotId = (board: string, oop: string, ip: string) => `river:${board.replace(/\s+/g, '')}:${oop}-${ip}`;
+export type NodeType = 'root' | 'after-check' | 'facing-bet' | 'facing-raise';
+export interface Step { player: number; kind: 'check' | 'bet' | 'fold' | 'call' | 'raise'; size: number } // size = index into bet sizes (-1 = none)
+export interface NodeLike { kind: string; player: number; n: number; strategy: ArrayLike<number>; range: ArrayLike<number> }
+
+/** Meaning of action index i at a node (same convention as the UI: fold/call/raises when facing a bet, else check/bets). */
+export function stepOf(player: number, i: number, fac: boolean): Step {
+  if (fac) return i === 0 ? { player, kind: 'fold', size: -1 } : i === 1 ? { player, kind: 'call', size: -1 } : { player, kind: 'raise', size: i - 2 };
+  return i === 0 ? { player, kind: 'check', size: -1 } : { player, kind: 'bet', size: i - 1 };
+}
+export const isFacing = (steps: Step[]) => steps.length > 0 && ['bet', 'raise'].includes(steps[steps.length - 1].kind);
+export function nodeType(steps: Step[]): NodeType {
+  if (!steps.length) return 'root';
+  if (!isFacing(steps)) return 'after-check';
+  return steps.filter((s) => s.kind === 'bet' || s.kind === 'raise').length > 1 ? 'facing-raise' : 'facing-bet';
+}
+
+/** Copy of `range` with combos that share a card with `board` (card ints) zeroed. */
+export function maskBoard(range: ArrayLike<number>, board: number[]): Float64Array {
+  const out = new Float64Array(H);
+  for (let h = 0; h < H; h++) { const [a, b] = combos[h]; if (!board.includes(a) && !board.includes(b)) out[h] = range[h]; }
+  return out;
+}
+
+export interface Sampled<V> { path: number[]; steps: Step[]; view: V; h: number }
+/**
+ * Random walk from the root. At each action node stop with prob `stopP` (hero acts here), else draw the next action
+ * from the node player's reach-weighted average strategy. Stops early at a terminal/chance child or an empty range.
+ * Hero combo is then drawn by reach at the final node, never colliding with the board.
+ */
+export async function samplePath<V extends NodeLike>(query: (path: number[]) => Promise<V>, board: number[],
+  rng: () => number = Math.random, stopP = 1 / 3): Promise<Sampled<V>> {
+  let path: number[] = [], steps: Step[] = [];
+  let view = await query(path);
+  for (;;) {
+    const r = maskBoard(view.range, board);
+    if (rng() < stopP) break;
+    const mass = Array.from({ length: view.n }, (_, k) => { let m = 0; for (let h = 0; h < H; h++) m += r[h] * view.strategy[k * H + h]; return m; });
+    const tot = mass.reduce((a, b) => a + b, 0);
+    if (!(tot > 0)) break;
+    let x = rng() * tot, a = view.n - 1;
+    for (let k = 0; k < view.n; k++) if (mass[k] > 0 && (x -= mass[k]) < 0) { a = k; break; }
+    const np = [...path, a], child = await query(np);
+    if (child.kind !== 'action' || !(maskBoard(child.range, board).some((v) => v > 0))) break;
+    steps = [...steps, stepOf(view.player, a, isFacing(steps))]; path = np; view = child;
+  }
+  return { path, steps, view, h: sampleHand(maskBoard(view.range, board), rng) };
+}
+
+export const spotId = (board: string, oop: string, ip: string, type: NodeType = 'root', path: number[] = []) =>
+  `river:${type}:${board.replace(/\s+/g, '')}:${oop}-${ip}:${path.join('.') || 'root'}`;

@@ -67,6 +67,9 @@ function validCreds(b) {
 }
 
 const SPOT_ID_RE = /^[A-Za-z0-9_.:/\-]{1,100}$/;
+// spot type = first segment, plus a node-type segment when present (e.g. river:facing-bet).
+const NODE_TYPE_RE = /^([A-Za-z0-9_.]+):(root|after-check|facing-bet|facing-raise)(?::|$)/;
+export const spotTypeOf = (id) => { const m = NODE_TYPE_RE.exec(id); return m ? `${m[1]}:${m[2]}` : id.split(':')[0]; };
 const COMBO_RE = /^[2-9TJQKA][cdhs][2-9TJQKA][cdhs]$/;
 function validResult(b) {
   const bad = (f) => { throw new HttpError(400, `invalid_${f}`); };
@@ -181,7 +184,7 @@ export function createApp({ db, webDist, now = Date.now, rateLimit = { max: 10, 
       const u = requireUser(req);
       const b = await readJson(req);
       validResult(b);
-      q.insRes.run(u.id, b.spotId, b.spotId.split(':')[0], b.hero, b.handCombo, b.action,
+      q.insRes.run(u.id, b.spotId, spotTypeOf(b.spotId), b.hero, b.handCombo, b.action,
         JSON.stringify(b.solverFreqs), b.evLoss, b.ms, b.lang ?? null, now());
       return send(res, 201, { ok: true });
     }

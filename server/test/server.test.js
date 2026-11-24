@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { openDb } from '../src/db.js';
-import { createApp } from '../src/app.js';
+import { createApp, spotTypeOf } from '../src/app.js';
 import { summarize } from '../src/stats.js';
 
 async function boot(opts = {}) {
@@ -146,4 +146,17 @@ test('accuracy / streak / series math on fixed data', () => {
   assert.equal(summarize([row(1, 0, [1], 0), row(2, 0, [1], 0)], now).streak, 2);
   assert.equal(summarize([row(2, 0, [1], 0)], now).streak, 0);
   assert.equal(summarize([], now).accuracy, null);
+});
+
+test('spot type keeps the river node type but legacy ids map to the first segment', async () => {
+  assert.equal(spotTypeOf('river:facing-bet:AsKd7c4h2s:mixed-wide:0.1'), 'river:facing-bet');
+  assert.equal(spotTypeOf('river:root:AsKd7c4h2s:mixed-wide:root'), 'river:root');
+  assert.equal(spotTypeOf('river:AsKd7c4h2s:mixed-wide'), 'river');
+  assert.equal(spotTypeOf('rfi:btn'), 'rfi');
+  const s = await boot();
+  const r = await s.call('POST', '/api/register', creds());
+  const id = 'river:facing-raise:AsKd7c4h2s:mixed-wide:0.2.2';
+  assert.equal((await s.call('POST', '/api/drills/results', result({ spotId: id }), r.cookie)).status, 201);
+  assert.deepEqual((await s.call('GET', '/api/progress', undefined, r.cookie)).json.bySpotType.map((t) => t.spotType), ['river:facing-raise']);
+  s.close();
 });

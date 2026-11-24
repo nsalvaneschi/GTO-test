@@ -20,3 +20,5 @@
 | streak | racha | serie |
 | EV loss | pérdida de EV | perdita di EV |
 | log in / register / log out | iniciar sesión / registrarse / cerrar sesión | accedi / registrati / esci |
+| first to act / after a check / facing a bet / facing a raise | primero en actuar / tras un pasar / ante una apuesta / ante una subida | primo a parlare / dopo una parola / di fronte a una puntata / di fronte a un rilancio |
+| action so far | acción hasta ahora | azione finora |

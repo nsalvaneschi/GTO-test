@@ -45,17 +45,25 @@ const PORT = process.env.E2E_PORT || '4599', base = `http://localhost:${PORT}`;
       await page.click('[data-nav="drill"]');
       // 3 drill answers
       const t0 = Date.now();
-      for (let n = 0; n < 3; n++) {
+      let n = 0, nonRoot = 0;
+      for (; n < 3 || (!nonRoot && n < 15); n++) {
         await page.click(n === 0 ? '#start' : '#next');
         await page.waitForSelector('#acts button[data-a]', { timeout: 180000 });
         if (n === 0) console.log(lang, 'solve+deal ms', Date.now() - t0);
         const combo = await page.getAttribute('#hand', 'data-combo');
         assert.strictEqual(await page.locator('#board-cards .card').count(), 5);
         assert.strictEqual(await page.locator('#hand .card').count(), 2);
-        await page.click(`#acts button[data-a="${n % 3}"]`);
+        const nAct = await page.locator('#acts button[data-a]').count();
+        const node = await page.getAttribute('#history', 'data-node');
+        assert(/^(root|after-check|facing-bet|facing-raise)$/.test(node), node);
+        assert.strictEqual(await page.locator('#history').getAttribute('data-depth') === '0', node === 'root');
+        const histTxt = await page.innerText('#history');
+        if (lang !== 'en') assert(!EN.test(histTxt), `${lang} english word in history: ${histTxt}`);
+        if (node !== 'root' && !nonRoot) { await page.screenshot({ path: `${out}/drill-nonroot-${lang}.png` }); console.log(lang, 'non-root node', node, histTxt); }
+        if (node !== 'root') nonRoot++;
+        await page.click(`#acts button[data-a="${n % nAct}"]`);
         await page.waitForSelector('#result');
         assert.strictEqual(await page.getAttribute('#session', 'data-total'), String(n + 1));
-        if (n === 2) await page.screenshot({ path: `${out}/drill-${lang}.png` });
         const body = await page.innerText('#screen');
         if (lang !== 'en') assert(!EN.test(body), `${lang} english word in drill: ${body.match(EN)}`);
         await page.waitForFunction((c) => !document.getElementById('save-err').textContent, null);
@@ -63,22 +71,34 @@ const PORT = process.env.E2E_PORT || '4599', base = `http://localhost:${PORT}`;
         assert.strictEqual(await page.locator('#grid .c.me').count(), 1);
         assert.strictEqual(posts[n].handCombo, combo);
       }
-      assert.strictEqual(posts.length, 3);
+      assert.strictEqual(posts.length, n);
+      assert(nonRoot > 0, 'no non-root node reached');
+      for (const p of posts) assert(/^river:(root|after-check|facing-bet|facing-raise):/.test(p.spotId), p.spotId);
+      await page.screenshot({ path: `${out}/drill-${lang}.png` });
       seen.drill[lang] = (await page.innerText('#screen')).split('\n').slice(0, 14).join('|');
       // progress matches posted values
       const check = async () => {
         await page.click('[data-nav="progress"]'); await page.waitForSelector('#p-total');
         const exp = {
-          acc: posts.filter((p) => p.solverFreqs[p.action] >= 0.1).length / 3,
-          ev: posts.reduce((a, p) => a + p.evLoss, 0) / 3,
+          acc: posts.filter((p) => p.solverFreqs[p.action] >= 0.1).length / posts.length,
+          ev: posts.reduce((a, p) => a + p.evLoss, 0) / posts.length,
         };
-        assert.strictEqual(await page.getAttribute('#p-total', 'data-value'), '3');
+        assert.strictEqual(await page.getAttribute('#p-total', 'data-value'), String(posts.length));
         assert(Math.abs(+await page.getAttribute('#p-acc', 'data-value') - exp.acc) < 1e-9);
         assert(Math.abs(+await page.getAttribute('#p-ev', 'data-value') - exp.ev) < 1e-6, 'ev');
         assert.strictEqual(await page.getAttribute('#p-streak', 'data-value'), '1');
         assert.strictEqual(await page.locator('#chart rect').count(), 30);
-        assert.strictEqual(await page.locator('#chart rect[data-total="3"]').count(), 1);
-        assert.strictEqual(await page.locator('#by-spot tr[data-type="river"]').count(), 1);
+        assert.strictEqual(await page.locator(`#chart rect[data-total="${posts.length}"]`).count(), 1);
+        const types = {}; for (const p of posts) { const t = p.spotId.split(':').slice(0, 2).join(':'); types[t] = (types[t] ?? 0) + 1; }
+        assert.strictEqual(await page.locator('#by-spot tr').count(), Object.keys(types).length);
+        assert(Object.keys(types).some((t) => t !== 'river:root'), 'breakdown has no non-root type');
+        for (const [t, c] of Object.entries(types)) {
+          const row = page.locator(`#by-spot tr[data-type="${t}"]`);
+          assert.strictEqual(await row.count(), 1, t);
+          assert((await row.innerText()).startsWith('River'), 'localized label ' + t);
+          assert(!(await row.innerText()).startsWith('river:'), 'raw key shown ' + t);
+          assert.strictEqual(+(await row.locator('td').nth(1).innerText()).match(/\d+/)[0], c, t);
+        }
         return exp;
       };
       const exp = await check();

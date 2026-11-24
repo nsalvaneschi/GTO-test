@@ -66,5 +66,11 @@
   "progress.last30": "Ultimi 30 giorni: precisione al giorno",
   "progress.bySpot": "Per tipo di situazione",
   "progress.spot.river": "River",
+  "progress.spot.river:root": "River: primo a parlare",
+  "progress.spot.river:after-check": "River: dopo una parola",
+  "progress.spot.river:facing-bet": "River: di fronte a una puntata",
+  "progress.spot.river:facing-raise": "River: di fronte a un rilancio",
+  "drill.history": "Azione finora",
+  "drill.noHistory": "nessuna, parli per primo",
   "progress.loading": "Caricamento..."
 }

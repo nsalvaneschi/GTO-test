@@ -66,5 +66,11 @@
   "progress.last30": "Last 30 days: accuracy per day",
   "progress.bySpot": "By spot type",
   "progress.spot.river": "River",
+  "progress.spot.river:root": "River: first to act",
+  "progress.spot.river:after-check": "River: after a check",
+  "progress.spot.river:facing-bet": "River: facing a bet",
+  "progress.spot.river:facing-raise": "River: facing a raise",
+  "drill.history": "Action so far",
+  "drill.noHistory": "none, you act first",
   "progress.loading": "Loading..."
 }
