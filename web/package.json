@@ -7,8 +7,9 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "test": "vitest run",
+    "i18n:review": "node scripts/i18n-review.cjs",
     "test:browser": "node tests/browser.cjs",
-    "test:e2e": "node tests/e2e.cjs && node tests/e2e-hh.cjs && node tests/e2e-hh-replay.cjs"
+    "test:e2e": "node tests/e2e.cjs && node tests/e2e-hh.cjs && node tests/e2e-hh-replay.cjs && node tests/e2e-mobile.cjs"
   },
   "devDependencies": {
     "typescript": "^7.0.2",

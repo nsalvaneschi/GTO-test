@@ -72,16 +72,27 @@ const tr = (k: Key, v?: Record<string, string | number>) => t(lang, k, v);
 const cssText = `
     body{font-family:system-ui,sans-serif;margin:12px;background:#1b1d22;color:#e8e8e8}
     label{margin-right:10px;font-size:13px} input,select,button{font-size:13px;margin-left:4px}
-    #grid{display:grid;grid-template-columns:repeat(13,34px);gap:1px;margin:10px 0}
+    #grid{display:grid;grid-template-columns:repeat(13,34px);gap:1px;margin:10px 0;max-width:100%;overflow-x:auto;overflow-y:hidden}
     .c{width:34px;height:34px;font-size:9px;color:#fff;display:flex;align-items:flex-start;text-shadow:0 0 2px #000;box-sizing:border-box;padding:1px}
     .c.me{outline:3px solid #fff;outline-offset:-3px;z-index:1}
     .legend span{display:inline-block;margin-right:12px;font-size:12px} .legend i{display:inline-block;width:10px;height:10px;margin-right:4px}
     button.a{margin:2px 6px 2px 0;padding:4px 10px}
-    header{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:8px} header h3{margin:0 10px 0 0}
+    header{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:8px} header h1{margin:0 10px 0 0;font-size:1.17em}
     nav button.on{font-weight:bold;border-bottom:3px solid #f0ad4e}
     .card{display:inline-block;background:#fff;border-radius:4px;padding:4px 6px;margin-right:4px;font-size:22px;font-weight:bold;border:1px solid #888}
     .sc{color:#111}.sh{color:#d55e00}.sd{color:#0072b2}.ss2{color:#009e73}
     table{border-collapse:collapse;font-size:13px} td,th{padding:3px 10px;text-align:left}
+    :focus-visible{outline:2px solid #f0ad4e;outline-offset:2px}
+    header nav{display:flex;flex-wrap:wrap}
+    textarea{max-width:100%;box-sizing:border-box}
+    @media (max-width:600px){
+      body{margin:8px}
+      label,input,select,button,table{font-size:15px}
+      button,select,input:not([type=checkbox]){min-height:36px}
+      table{display:block;max-width:100%;overflow-x:auto}
+      td,th{padding:3px 6px}
+      .c{font-size:10px}
+    }
     .err{color:#f66}.ok{color:#5cb85c}.bad{color:#f0ad4e}
   `;
 
@@ -90,8 +101,10 @@ function render() {
   const who = user
     ? `<span id="whoami" data-user="${user}">${tr('auth.loggedAs', { name: user })}</span><button id="logout">${tr('auth.logout')}</button>`
     : `<button data-nav="auth" id="to-auth">${tr('auth.login')}</button>`;
+  const pageTitle = `${tr('app.name')} - ${tr(screen === 'auth' ? 'auth.login' : (('nav.' + screen) as Key))}`;
+  document.title = pageTitle;
   $('app').innerHTML = `<style>${cssText}</style>
-  <header><h3 id="title">${tr('title')}</h3><nav>${nav}</nav>
+  <header><h1 id="title">${pageTitle}</h1><nav>${nav}</nav>
   <label>${tr('language')}<select id="lang">${(Object.keys(locales) as Lang[]).map((l) => `<option value="${l}" ${l === lang ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
   ${who}</header><div id="screen"></div>`;
   $<HTMLSelectElement>('lang').onchange = (e) => { readForm(); lang = (e.target as HTMLSelectElement).value as Lang; document.documentElement.lang = lang; render(); };
