@@ -3,3 +3,4 @@ node_modules/
 web/src/wasm/
 web/dist/
 web/test-artifacts/
+private-data/
