@@ -21,4 +21,7 @@ export const api = {
   logout: () => call<{ ok: true }>('POST', '/api/logout', {}),
   postResult: (r: unknown) => call<{ ok: true }>('POST', '/api/drills/results', r),
   progress: () => call<Progress>('GET', '/api/progress'),
+  hhImport: (hands: unknown[]) => call<{ added: number; duplicates: number }>('POST', '/api/hh', { hands }),
+  hhList: (limit: number, offset: number) => call<{ total: number; hands: { id: number; site: string; handId: string }[] }>('GET', `/api/hh?limit=${limit}&offset=${offset}`),
+  hhDecisions: (decisions: unknown[]) => call<{ saved: number }>('POST', '/api/hh/decisions', { decisions }),
 };

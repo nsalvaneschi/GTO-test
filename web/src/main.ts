@@ -1,6 +1,7 @@
 import { t, fmt, locales, type Lang, type Key } from './i18n';
 import { parseRange, presets, R } from './ranges';
 import { api, ApiError, type Progress } from './api';
+import { renderHh } from './hh/screen';
 import { combos, comboName, cardName, randomBoard, freqsFor, evLossPct, isCorrect, spotId, samplePath, type Street, nodeType, isFacing, type Step, type NodeType, SUITS, RANKS } from './drill';
 
 // Bet sizes sent to the engine; labels derive from these (NodeView has no size info, so this assumes none are merged/dropped, e.g. at all-in).
@@ -8,7 +9,7 @@ const sizes = [0.5, 1];
 const colors = { fold: '#4a90d9', check: '#5cb85c', call: '#5cb85c', bet: ['#f0ad4e', '#e8743b', '#c0392b'] };
 
 interface View { kind: string; player: number; n: number; strategy: number[]; range: number[]; action_ev?: number[]; opp_mass?: number[] }
-type Screen = 'solver' | 'drill' | 'progress' | 'auth';
+type Screen = 'solver' | 'drill' | 'progress' | 'hh' | 'auth';
 const DRILL = { pot: 10, stack: 50 };
 let screen: Screen = 'solver';
 let owner: 'solver' | 'drill' = 'solver';
@@ -83,7 +84,7 @@ const cssText = `
   `;
 
 function render() {
-  const nav = (['solver', 'drill', 'progress'] as const).map((s) => `<button data-nav="${s}" class="${screen === s ? 'on' : ''}">${tr(('nav.' + s) as Key)}</button>`).join('');
+  const nav = (['solver', 'drill', 'progress', 'hh'] as const).map((s) => `<button data-nav="${s}" class="${screen === s ? 'on' : ''}">${tr(('nav.' + s) as Key)}</button>`).join('');
   const who = user
     ? `<span id="whoami" data-user="${user}">${tr('auth.loggedAs', { name: user })}</span><button id="logout">${tr('auth.logout')}</button>`
     : `<button data-nav="auth" id="to-auth">${tr('auth.login')}</button>`;
@@ -98,6 +99,7 @@ function render() {
   if (screen === 'solver') renderSolver();
   else if (screen === 'drill') renderDrill();
   else if (screen === 'progress') renderProgress();
+  else if (screen === 'hh') renderHh($('screen'), { tr, lang, user, errText, codeOf });
   else renderAuth();
 }
 
