@@ -1,6 +1,6 @@
 import { t, fmt, locales, type Lang, type Key } from './i18n';
 import { parseRange, presets, R } from './ranges';
-import { api, ApiError, type Progress } from './api';
+import { api, ApiError, type HhProgress, type Progress } from './api';
 import { renderHh } from './hh/screen';
 import { combos, comboName, cardName, randomBoard, freqsFor, evLossPct, isCorrect, spotId, samplePath, type Street, nodeType, isFacing, type Step, type NodeType, SUITS, RANKS } from './drill';
 
@@ -16,6 +16,8 @@ let owner: 'solver' | 'drill' = 'solver';
 let user: string | null = null;
 let authErr = '';
 let progress: Progress | 'loading' | null = null;
+let progTab: 'drills' | 'hh' = 'drills';
+let hhProg: HhProgress | 'loading' | null = null;
 const drill = { phase: 'idle' as 'idle' | 'solving' | 'ask' | 'reveal', board: '', oop: '', ip: '', view: null as View | null, h: 0,
   path: [] as number[], steps: [] as Step[], freqs: [] as number[], chosen: -1, evLoss: 0, street: 'river' as Street, solveT0: 0, solveMs: 0, solveExpl: 0, t0: 0, correct: 0, total: 0, saveErr: '' };
 
@@ -95,7 +97,7 @@ function render() {
   $<HTMLSelectElement>('lang').onchange = (e) => { readForm(); lang = (e.target as HTMLSelectElement).value as Lang; document.documentElement.lang = lang; render(); };
   document.querySelectorAll<HTMLButtonElement>('[data-nav]').forEach((b) => b.onclick = () => go(b.dataset.nav as Screen));
   const lo = document.getElementById('logout');
-  if (lo) lo.onclick = async () => { try { await api.logout(); } catch { /* ignore */ } user = null; progress = null; drill.phase = 'idle'; drill.correct = drill.total = 0; go('auth'); };
+  if (lo) lo.onclick = async () => { try { await api.logout(); } catch { /* ignore */ } user = null; progress = null; hhProg = null; progTab = 'drills'; drill.phase = 'idle'; drill.correct = drill.total = 0; go('auth'); };
   if (screen === 'solver') renderSolver();
   else if (screen === 'drill') renderDrill();
   else if (screen === 'progress') renderProgress();
@@ -104,7 +106,7 @@ function render() {
 }
 
 function go(s: Screen) {
-  readForm(); screen = s; authErr = '';
+  readForm(); screen = s; authErr = ''; if (s === 'progress') progTab = 'drills';
   if (s === 'progress' && user) { progress = 'loading'; api.progress().then((p) => { progress = p; if (screen === 'progress') render(); }, (e) => { progress = null; handleApiErr(e); }); }
   render();
 }
@@ -251,7 +253,14 @@ function handClass(h: number): string {
 
 function renderProgress() {
   if (!user) return needLogin();
-  const el = $('screen');
+  $('screen').innerHTML = `<nav id="prog-tabs">${(['drills', 'hh'] as const).map((t) => `<button data-ptab="${t}" class="${progTab === t ? 'on' : ''}">${tr(('hh.prog.tab.' + t) as Key)}</button>`).join('')}</nav><div id="prog-body"></div>`;
+  document.querySelectorAll<HTMLButtonElement>('[data-ptab]').forEach((b) => b.onclick = () => {
+    progTab = b.dataset.ptab as typeof progTab;
+    if (progTab === 'hh') { hhProg = 'loading'; api.hhProgress().then((p) => { hhProg = p; if (screen === 'progress') render(); }, (e) => { hhProg = null; handleApiErr(e); }); }
+    render();
+  });
+  const el = $('prog-body');
+  if (progTab === 'hh') return renderHhProgress(el);
   if (progress === 'loading' || !progress) { el.innerHTML = `<p>${tr('progress.loading')}</p><div class="err">${authErr ? errText(authErr) : ''}</div>`; return; }
   const p = progress;
   if (!p.total) { el.innerHTML = `<h4>${tr('progress.title')}</h4><p id="p-empty">${tr('progress.empty')}</p>`; return; }
@@ -276,6 +285,23 @@ function renderProgress() {
       <text x="${W}" y="${Hh + 12}" font-size="10" fill="#aaa" text-anchor="end">${day(p.last30Days[p.last30Days.length - 1].date)}</text></svg>
     <p><b>${tr('progress.bySpot')}</b></p>
     <table id="by-spot">${p.bySpotType.map((s) => `<tr data-type="${s.spotType}"><td>${('progress.spot.' + s.spotType) in locales.en ? tr(('progress.spot.' + s.spotType) as Key) : s.spotType}</td><td>${tr('progress.answers', { count: s.total })}</td><td>${tr('progress.accuracy')}: ${pc(s.accuracy)}</td><td>${tr('progress.meanEvLoss')}: ${evs(s.meanEvLoss)}</td></tr>`).join('')}</table>`;
+}
+
+function renderHhProgress(el: HTMLElement) {
+  if (hhProg === 'loading' || !hhProg) { el.innerHTML = `<p>${tr('progress.loading')}</p><div class="err">${authErr ? errText(authErr) : ''}</div>`; return; }
+  const p = hhProg;
+  const note = `<div id="hh-prog-note" style="border:1px solid #f0ad4e;padding:6px 10px;margin:6px 0;max-width:640px">${tr('hh.disclaimer')} ${tr('hh.prog.note')}</div>`;
+  if (!p.total) { el.innerHTML = `<h4>${tr('hh.prog.tab.hh')}</h4>${note}<p id="hh-p-empty">${tr('hh.prog.empty')}</p>`; return; }
+  const pc = (x: number | null) => x === null ? '-' : fmt(x, lang, { style: 'percent', maximumFractionDigits: 0 });
+  const ev = (x: number | null) => x === null ? '-' : tr('unit.ofPot', { value: fmt(x / 100, lang, { style: 'percent', minimumFractionDigits: 2, maximumFractionDigits: 2 }) });
+  el.innerHTML = `<h4>${tr('hh.prog.tab.hh')}</h4>${note}
+    <table id="hh-p"><tr><th>${tr('hh.results')}</th><td id="hh-p-total" data-value="${p.total}">${tr('hh.prog.decisions', { count: p.total })} <span class="badge-approx" style="border:1px solid #f0ad4e;border-radius:3px;padding:0 4px;font-size:11px;color:#f0ad4e">${tr('hh.badge.approx')}</span></td></tr>
+    <tr><th>${tr('progress.accuracy')}</th><td id="hh-p-acc" data-value="${p.accuracy}">${pc(p.accuracy)}</td></tr>
+    <tr><th>${tr('progress.meanEvLoss')}</th><td id="hh-p-ev" data-value="${p.meanEvLoss}">${ev(p.meanEvLoss)}</td></tr></table>
+    <p><b>${tr('progress.bySpot')}</b></p>
+    <table id="hh-by-street">${p.bySpotType.map((s) => `<tr data-type="${s.spotType}"><td>${('street.' + s.spotType) in locales.en ? tr(('street.' + s.spotType) as Key) : s.spotType}</td><td>${tr('hh.prog.decisions', { count: s.total })}</td><td>${tr('progress.meanEvLoss')}: ${ev(s.meanEvLoss)}</td></tr>`).join('')}</table>
+    <p><b>${tr('hh.prog.byStatus')}</b></p>
+    <table id="hh-by-status">${Object.entries(p.byStatus).map(([k, n]) => `<tr data-status="${k}"><td>${('hh.status.' + k) in locales.en ? tr(('hh.status.' + k) as Key) : k}</td><td>${fmt(n, lang)}</td></tr>`).join('')}</table>`;
 }
 
 function renderSolver() {

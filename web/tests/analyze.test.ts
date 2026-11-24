@@ -5,13 +5,15 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { initSync, Solver } from '../src/wasm/gto_wasm.js';
 import { parseHand } from '../src/hh/parse';
-import { analyzeHand, classify } from '../src/hh/analyze';
+import { analyzeHand as analyzeAny, classify, type Env } from '../src/hh/analyze';
 import { LocalBackend } from '../src/hh/backend';
 import { mapLine, STD_SIZES } from '../src/hh/sizes';
 import { toServerHand } from '../src/hh/upload';
 import { locales } from '../src/i18n';
 
 initSync({ module: readFileSync(join(__dirname, '../src/wasm/gto_wasm_bg.wasm')) });
+/** H3 river tests: solve the river alone (turn+river solves are tested in turn.test.ts). */
+const analyzeHand = (h: any, env: Env) => analyzeAny(h, { skipTurn: true, ...env });
 const newBackend = () => new LocalBackend((c) => new Solver(c));
 
 /** Synthetic heads-up SRP (Hero button/SB opens, V1 BB calls, flop bet-call, turn check-check). River lines are free text. */
@@ -53,7 +55,7 @@ const foldTo = (amt: string) => [...vBet(amt), 'Hero: folds', `Uncalled bet ($${
 describe('classifier reason codes', () => {
   const reasons = (h: any) => classify(h).map((c) => [c.street, c.reason]);
   test('HU SRP river is a candidate; earlier streets carry reasons', () => {
-    expect(reasons(parse(hu('1', BOARD, '5h 3c', callPot('5h 3c', 'V1'))))).toEqual([['preflop', 'preflop'], ['flop', 'flop'], ['turn', 'turn_not_yet'], ['river', null]]);
+    expect(reasons(parse(hu('1', BOARD, '5h 3c', callPot('5h 3c', 'V1'))))).toEqual([['preflop', 'preflop'], ['flop', 'flop'], ['turn', null], ['river', null]]);
   });
   test('multiway river', () => {
     const t = `SYNTHETIC - invented data, not a real hand history
@@ -193,7 +195,7 @@ describe('upload adapter and i18n codes', () => {
     expect(s.hero_pos).toBe('BTN');
   });
   test('every status and reason code has en/es/it text', () => {
-    const codes = ['multiway', 'preflop', 'allin_preflop', 'flop', 'turn_not_yet', 'no_hero', 'no_hero_decision', 'hero_cards_unknown', 'no_preset', 'range_empty', 'off_tree', 'bad_board', 'solve_failed',
+    const codes = ['multiway', 'preflop', 'allin_preflop', 'flop', 'turn_small_menu', 'no_hero', 'no_hero_decision', 'hero_cards_unknown', 'no_preset', 'range_empty', 'off_tree', 'bad_board', 'solve_failed',
       'unsupported_format', 'tournament', 'unsupported_game', 'run_it_twice', 'bad_header', 'no_seats', 'no_button', 'no_blinds', 'bad_structure', 'bad_card', 'duplicate_card', 'unknown_player', 'bad_action', 'bad_amount', 'stack_overflow', 'pot_mismatch', 'truncated'];
     for (const l of Object.values(locales)) {
       for (const c of codes) expect(l['hh.reason.' + c], c).toBeTruthy();

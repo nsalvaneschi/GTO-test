@@ -1,7 +1,8 @@
 // Solve backends for hand-history analysis. LocalBackend runs inside the WASM worker (and in tests); WorkerBackend
 // (workerBackend.ts) forwards to it. Solves are cached by config hash so hands on the same board/ranges/line reuse them.
 export interface NodeView { kind: string; player: number; n: number; strategy: number[]; range: number[]; action_ev?: number[]; opp_mass?: number[] }
-export interface SolveParams { target: number; chunk: number; maxIters: number }
+/** maxMs: wall-time budget; the solve throws Error('timeout') once exceeded (checked between chunks). */
+export interface SolveParams { target: number; chunk: number; maxIters: number; maxMs?: number }
 export interface SolveInfo { cached: boolean; expl: number; iters: number; ms: number }
 export interface SolveBackend {
   solve(key: string, config: string, p: SolveParams, onProgress?: (expl: number, iters: number) => void): Promise<SolveInfo>;
@@ -38,6 +39,7 @@ export class LocalBackend implements SolveBackend {
       onProgress?.(expl, iters);
       await new Promise((r) => setTimeout(r, 0)); // let a cancel message in
       if (id !== this.run) { solver.free(); throw new Error('cancelled'); }
+      if (p.maxMs && Date.now() - t0 > p.maxMs && expl > p.target) { solver.free(); throw new Error('timeout'); }
     }
     this.cache.set(key, { config, solver, expl, iters });
     while (this.cache.size > this.maxCached) { const k = this.cache.keys().next().value!; this.cache.get(k)!.solver.free(); this.cache.delete(k); }

@@ -35,3 +35,6 @@
 | all-in | all-in | all-in |
 | decision | decisión | decisione |
 | analyse / upload | analizar / subir | analizza / carica |
+| replay (hand replay) | repetición | replay |
+| played hands (progress tab) | manos jugadas | mani giocate |
+| mistake (EV loss above a threshold) | error | errore |

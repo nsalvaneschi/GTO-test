@@ -4,6 +4,7 @@ const { chromium } = require('playwright');
 const { spawn } = require('child_process');
 const fs = require('fs'), os = require('os'), path = require('path'), assert = require('assert');
 const root = path.join(__dirname, '..', '..');
+const { startServer } = require('./server.cjs');
 const PORT = process.env.E2E_HH_PORT || '4598', base = `http://localhost:${PORT}`;
 
 const hu = (id, hero, river) => `PokerStars Hand #${id}:  Hold'em No Limit ($0.50/$1 USD) - 2024/02/01 20:00:00 ET
@@ -32,10 +33,7 @@ const oddSize = (id) => hu(id, '5h 3c', ['V1: bets $7.50', 'Hero: calls $7.50', 
 const EN = /\b(Hand|Decisions|Analyse|Upload|approximate|Not analysed|Off-tree|Parse|Overrides)\b/;
 
 (async () => {
-  const tmp = fs.mkdtempSync(path.join(process.env.E2E_TMP || os.tmpdir(), 'gto-e2e-hh-'));
-  const srv = spawn('node', ['server/src/index.js'], { cwd: root, env: { ...process.env, PORT, DB_PATH: path.join(tmp, 'app.db'), WEB_DIST: path.join(root, 'web/dist') } });
-  let log = ''; srv.stdout.on('data', (d) => log += d); srv.stderr.on('data', (d) => log += d);
-  for (let i = 0; i < 50; i++) { try { if ((await fetch(base + '/api/health')).ok) break; } catch { await new Promise((r) => setTimeout(r, 100)); } }
+  const { srv, base: _b, log: _log } = await startServer(PORT, 'gto-e2e-hh-');
   const out = path.join(__dirname, '..', 'test-artifacts'); fs.mkdirSync(out, { recursive: true });
   const browser = await chromium.launch();
   try {
@@ -69,7 +67,7 @@ const EN = /\b(Hand|Decisions|Analyse|Upload|approximate|Not analysed|Off-tree|P
       assert.strictEqual(vals.filter((v) => v[0] === 'ok').length, 2);
       assert.strictEqual(vals.filter((v) => v[0] === 'off_tree' && v[1] === '').length, 1);
       assert(Math.max(...vals.filter((v) => v[0] === 'ok').map((v) => +v[1])) > 50, 'call with air should lose a lot');
-      assert.strictEqual(await page.locator('#hh-results .badge-approx').count(), 2);
+      assert.strictEqual(await page.locator('#hh-results .badge-approx').count(), 5); // 3 turn checks + 2 river decisions
       const body = await page.innerText('#screen');
       if (lang !== 'en') assert(!EN.test(body), `${lang} english word: ${body.match(EN)}`);
       assert.strictEqual(await page.isDisabled('#hh-upload'), true); // still logged out
@@ -96,7 +94,7 @@ const EN = /\b(Hand|Decisions|Analyse|Upload|approximate|Not analysed|Off-tree|P
       assert(decs.decisions.some((d) => d.status === 'unsupported' && d.reason === 'flop'));
       const hh = await j('/api/progress?source=hh');
       assert.strictEqual(hh.source, 'hh');
-      assert.strictEqual(hh.total, 2);
+      assert.strictEqual(hh.total, 5); // 3 turn + 2 river ok decisions
       assert(hh.meanEvLoss > 20, 'mean ev loss ' + hh.meanEvLoss);
       const drills = await j('/api/progress');
       assert.strictEqual(drills.total, 0); // never mixed with drills

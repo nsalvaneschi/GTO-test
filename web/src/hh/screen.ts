@@ -4,6 +4,8 @@ import { fmt, locales, type Key } from '../i18n';
 import { analyzeHand, classify, type DecisionResult } from './analyze';
 import { parseHistory } from './parse';
 import type { ParseSummary } from './types';
+import { parseNodePath, labelKey } from './replay';
+import { bindTabs, currentTab, invalidate, renderHands, tabsHtml } from './pages';
 import { uploadAll } from './upload';
 import { WorkerBackend } from './workerBackend';
 
@@ -26,6 +28,7 @@ const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&l
 const key = (site: string, id: string) => `${site}:${id}`;
 
 export function renderHh(el: HTMLElement, c: Ctx) {
+  if (currentTab() === 'hands') { renderHands(el, c, () => renderHh(el, c)); return; }
   const { tr, lang } = c;
   const pct = (x: number, d = 0) => fmt(x, lang, { style: 'percent', minimumFractionDigits: d, maximumFractionDigits: d });
   const ofPot = (x: number) => tr('unit.ofPot', { value: pct(x / 100, 2) });
@@ -54,16 +57,17 @@ export function renderHh(el: HTMLElement, c: Ctx) {
       const m = d.meta, hasEv = d.evLoss !== null && m;
       const tip = m ? tr('hh.tooltip', { preset: d.rangePreset, top: pct(m.top), bluff: pct(m.bluff), delta: pct(m.maxDelta, 1), expl: pct(m.expl / 100, 2), iters: tr('iterations', { count: m.iters }) }) : '';
       const stat = tr(k('hh.status.' + d.status)) + (d.reason ? `: ${reasonText(d.reason)}` : '');
-      return `<tr data-hand="${esc(id.split(':')[1])}" data-street="${d.street}" data-status="${d.status}" data-reason="${d.reason ?? ''}" data-evloss="${hasEv ? d.evLoss : ''}" data-preset="${esc(d.rangePreset)}">
+      return `<tr data-hand="${esc(id.split(':')[1])}" data-street="${d.street}" data-status="${d.status}" data-reason="${d.reason ?? ''}" data-evloss="${hasEv ? d.evLoss : ''}" data-preset="${esc(d.rangePreset)}" data-solve="${m?.solve ?? ''}" data-tier="${m?.tier ?? ''}" data-cached="${m?.cached ?? ''}" data-solvems="${m?.solveMs ?? ''}">
         <td>${esc(id.split(':')[1])}</td><td>${tr(k('street.' + d.street))}</td><td>${label(d)}</td><td>${stat}</td>
         <td>${hasEv ? `${ofPot(d.evLoss!)} <span class="badge-approx" title="${esc(tip)}" style="border:1px solid #f0ad4e;border-radius:3px;padding:0 4px;font-size:11px;color:#f0ad4e">${tr('hh.badge.approx')}</span>` : '-'}</td>
-        <td>${d.solverFreqs ? d.solverFreqs.map((f) => pct(f)).join(' / ') : '-'}</td></tr>`;
+        <td>${d.solverFreqs ? d.solverFreqs.map((f, i) => { const t = parseNodePath(d.nodePath)?.labels[i], lk = t ? labelKey(t) : null; return `${lk ? tr(lk.key, lk.pct !== null ? { size: pct(lk.pct) } : undefined) + ' ' : ''}${pct(f)}`; }).join(' / ') : '-'}</td></tr>`;
     })).join('')}</table>` : `<p id="hh-noresults">${tr('hh.noResults')}</p>`;
 
   const solving = S.phase === 'solving';
   const canUp = !!c.user && all.length > 0 && !S.uploading && !solving;
   el.innerHTML = `<h4>${tr('hh.title')}</h4>
     <div id="hh-disclaimer" style="border:1px solid #f0ad4e;padding:6px 10px;margin:6px 0;max-width:640px">${tr('hh.disclaimer')}</div>
+    ${tabsHtml(c)}
     <div>${tr('hh.paste')}</div>
     <textarea id="hh-text" rows="8" cols="80" ${solving ? 'disabled' : ''}>${esc(S.text)}</textarea><br>
     <details style="margin:6px 0"><summary>${tr('hh.override.title')}</summary>
@@ -74,6 +78,7 @@ export function renderHh(el: HTMLElement, c: Ctx) {
     <button id="hh-analyse" class="a" ${solving || !S.parsed?.counts.ok ? 'disabled' : ''}>${tr('hh.analyse')}</button>
     ${solving ? `<button id="hh-cancel" class="a">${tr('hh.cancel')}</button>` : ''}
     <div id="hh-progress" data-phase="${S.phase}" style="margin:6px 0">${solving ? progressText(c) : S.cancelled ? tr('hh.cancelled') : ''}</div>
+    ${solving ? `<div style="font-size:12px;opacity:.7">${tr('hh.solvingStage')}</div>` : ''}
     <div class="err" id="hh-err">${esc(S.err)}</div>
     ${summary}${handsHtml}
     <h4>${tr('hh.results')}</h4>${resHtml}
@@ -81,6 +86,7 @@ export function renderHh(el: HTMLElement, c: Ctx) {
       <div id="hh-upload-hint">${c.user ? '' : tr('hh.uploadHint')}</div>
       <div id="hh-upload-msg" class="ok" data-saved="${S.upMsg ? 1 : 0}">${esc(S.upMsg)}</div><div id="hh-upload-err" class="err">${esc(S.upErr)}</div></div>`;
 
+  bindTabs(el, () => renderHh(el, c));
   const val = (id: string) => (document.getElementById(id) as HTMLInputElement).value;
   const readInputs = () => { S.text = val('hh-text'); S.width = val('hh-width'); S.heroRange = val('hh-hero-range'); S.villRange = val('hh-vill-range'); };
   ['hh-text', 'hh-width', 'hh-hero-range', 'hh-vill-range'].forEach((id) => { document.getElementById(id)!.oninput = readInputs; });
@@ -115,7 +121,7 @@ export function renderHh(el: HTMLElement, c: Ctx) {
     S.uploading = true; S.upErr = ''; S.upMsg = '';
     try {
       const hands = S.parsed!.results.flatMap((r) => (r.ok ? [r.hand] : []));
-      S.upMsg = tr('hh.uploaded', await uploadAll(c.user, hands, S.results));
+      S.upMsg = tr('hh.uploaded', await uploadAll(c.user, hands, S.results)); invalidate();
     } catch (e) { S.upErr = c.errText(c.codeOf(e)); }
     S.uploading = false;
     renderHh(el, c);

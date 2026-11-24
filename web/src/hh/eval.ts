@@ -63,3 +63,17 @@ export function riverEquities(board: number[], mine: number[], opp: number[]): n
     return n ? w / n : 0.5;
   });
 }
+
+/** Equity of each combo in `mine` against the uniform `opp` list on a 4-card board, averaged over all rivers (conflicting rivers skipped per combo). */
+export function turnEquities(board: number[], mine: number[], opp: number[]): number[] {
+  const sum = new Array<number>(mine.length).fill(0), cnt = new Array<number>(mine.length).fill(0);
+  const has = (h: number, r: number) => combos[h][0] === r || combos[h][1] === r;
+  for (let r = 0; r < 52; r++) {
+    if (board.includes(r)) continue;
+    const idx: number[] = [];
+    mine.forEach((h, i) => { if (!has(h, r)) idx.push(i); });
+    const eq = riverEquities([...board, r], idx.map((i) => mine[i]), opp.filter((h) => !has(h, r)));
+    idx.forEach((i, k) => { sum[i] += eq[k]; cnt[i]++; });
+  }
+  return sum.map((s, i) => (cnt[i] ? s / cnt[i] : 0.5));
+}

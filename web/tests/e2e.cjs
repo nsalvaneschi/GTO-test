@@ -3,12 +3,10 @@ const { chromium } = require('playwright');
 const { spawn } = require('child_process');
 const fs = require('fs'), os = require('os'), path = require('path'), assert = require('assert');
 const root = path.join(__dirname, '..', '..');
+const { startServer } = require('./server.cjs');
 const PORT = process.env.E2E_PORT || '4599', base = `http://localhost:${PORT}`;
 (async () => {
-  const tmp = fs.mkdtempSync(path.join(process.env.E2E_TMP || os.tmpdir(), 'gto-e2e-'));
-  const srv = spawn('node', ['server/src/index.js'], { cwd: root, env: { ...process.env, PORT, DB_PATH: path.join(tmp, 'app.db'), WEB_DIST: path.join(root, 'web/dist') } });
-  let log = ''; srv.stdout.on('data', (d) => log += d); srv.stderr.on('data', (d) => log += d);
-  for (let i = 0; i < 50; i++) { try { if ((await fetch(base + '/api/health')).ok) break; } catch { await new Promise((r) => setTimeout(r, 100)); } }
+  const { srv, base: _b, log: _log } = await startServer(PORT, 'gto-e2e-');
   const out = path.join(__dirname, '..', 'test-artifacts'); fs.mkdirSync(out, { recursive: true });
   const browser = await chromium.launch();
   const EN = /\b(Fold|Check|Call|Bet|Raise|Next hand|Progress|Accuracy|Streak|Mistake|Correct|Your hand|Log out|Log in|Register|EV loss|Start drill|Mean|answers?|days?|Username|Choose|Signed in)\b/;
@@ -77,7 +75,11 @@ const PORT = process.env.E2E_PORT || '4599', base = `http://localhost:${PORT}`;
       await page.screenshot({ path: `${out}/drill-${lang}.png` });
       // turn drills: 4-card board, turn spot ids, cancel button during solve
       await page.click('#next'); // river 'next' starts another river drill; cancel it, then switch street
-      await page.waitForSelector('#cancel'); await page.click('#cancel'); await page.waitForSelector('#street');
+      // Click Cancel inside the page right away: Playwright's click() waits for 2 animation frames of stability, which
+      // can outlast a ~0.2 s river solve (the button is replaced when the solve completes) and caused a flaky timeout.
+      const cancelled = await page.evaluate(() => { const b = document.getElementById('cancel'); if (b) b.click(); return !!b; });
+      assert(cancelled, 'cancel button was not present right after starting a drill');
+      await page.waitForSelector('#street');
       assert.strictEqual(posts.length, n);
       await page.selectOption('#street', 'turn');
       for (let k = 0; k < 2; k++) {
@@ -140,5 +142,5 @@ const PORT = process.env.E2E_PORT || '4599', base = `http://localhost:${PORT}`;
     }
     for (const k of ['drill', 'progress', 'err']) assert.strictEqual(new Set(Object.values(seen[k])).size, 3, k + JSON.stringify(seen[k]));
     console.log('E2E OK');
-  } catch (e) { console.error(log); throw e; } finally { await browser.close(); srv.kill(); }
+  } catch (e) { console.error(_log()); throw e; } finally { await browser.close(); srv.kill(); }
 })().then(() => process.exit(0)).catch((e) => { console.error(e); process.exit(1); });

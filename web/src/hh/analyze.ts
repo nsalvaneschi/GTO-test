@@ -1,19 +1,30 @@
-// Hand-history analysis (milestone H3): classify hero decisions, build approximate ranges, map bet sizes onto the
-// engine tree, solve the river in the WASM worker and compute EV loss with the same evLossPct as the drills.
+// Hand-history analysis (H3 river, H4 turn): classify hero decisions, build approximate ranges, map bet sizes onto the
+// engine tree, solve in the WASM worker and compute EV loss with the same evLossPct as the drills. Heads-up turn hands
+// are solved once as a turn+river tree and the hero's turn and river decisions all read that solve.
 import { combos, evLossPct, freqsFor, RANKS, SUITS } from '../drill';
-import { configHash, type SolveBackend, type SolveParams } from './backend';
-import { riverEquities } from './eval';
+import { configHash, type NodeView, type SolveBackend, type SolveParams } from './backend';
+import { riverEquities, turnEquities } from './eval';
 import { NARROW, positions, presetFor, rangeOf, type Line, type PotType } from './ranges';
-import { mapLine, RAISE_CAP, type LineAction } from './sizes';
+import { mapLine, RAISE_CAP, STD_SIZES, type LineAction, type MapResult } from './sizes';
 import type { ActionKind, Hand, Site, Street } from './types';
 
-export const ENGINE_VER = 'river-wasm-0.1';
+export const ENGINE_VER = 'hh-wasm-0.2';
 export const SOLVE: SolveParams = { target: 0.3, chunk: 20, maxIters: 2000 };
+/** Turn+river solve: no re-raise in the tree (cap 1, like the turn drill) keeps the standard menu inside the 1 GB budget; 20 s wall budget. */
+export const TURN_CAP = 1;
+export const TURN_SOLVE: SolveParams = { target: 0.3, chunk: 10, maxIters: 300, maxMs: 20000 };
+/** River menu inside the turn+river tree. Measured on a 226 x 331 combo turn spot: 4 river sizes 20.5 s, 2 sizes 9 s (turn menu STD in both).
+ *  River decisions with other sizes are answered by the cheap river-only solve instead. */
+export const RIVER_IN_TURN = [0.5, 1];
+/** Menu used when the full turn solve is too slow or too big: turn 50%/100%, river 50% (the turn drill menu). */
+export const SMALL_MENU: [number[], number[]] = [[0.5, 1], [0.5]];
+/** Config hashes whose full-menu solve timed out or did not fit: later hands skip straight to the small menu. */
+export const slowKeys = new Set<string>();
 /** Above this exploitability (% of pot) the numbers are only indicative: status approx_only. */
 export const MAX_EXPL = 1;
 
 export type Reason =
-  | 'multiway' | 'preflop' | 'allin_preflop' | 'flop' | 'turn_not_yet' | 'no_hero' | 'no_hero_decision'
+  | 'multiway' | 'preflop' | 'allin_preflop' | 'flop' | 'turn_small_menu' | 'no_hero' | 'no_hero_decision'
   | 'hero_cards_unknown' | 'no_preset' | 'range_empty' | 'off_tree' | 'bad_board' | 'solve_failed';
 export type Status = 'ok' | 'off_tree' | 'unsupported' | 'approx_only';
 
@@ -35,10 +46,9 @@ export function classify(hand: Hand): Candidate[] {
     let reason: Reason | null = null;
     if (a.street === 'preflop') reason = preflopAllin ? 'allin_preflop' : 'preflop';
     else if (a.street === 'flop') reason = 'flop';
-    else if (a.street === 'turn') reason = 'turn_not_yet';
     else if (hand.seats.filter((s) => !folded.has(s.seat)).length > 2) reason = 'multiway';
     else if (!hand.hero_cards) reason = 'hero_cards_unknown';
-    else if (hand.board.length !== 5) reason = 'bad_board';
+    else if (a.street === 'turn' ? hand.board.length < 4 : hand.board.length !== 5) reason = 'bad_board';
     out.push({ hand, actionIndex: i, street: a.street, reason });
   });
   if (!out.length) out.push({ hand, actionIndex: -1, street: 'preflop', reason: 'no_hero_decision' });
@@ -51,6 +61,8 @@ export interface Meta {
   kind: ActionKind; frac: number | null; heroPos: string; villainPos: string; heroOop: boolean; potType: PotType;
   top: number; bluff: number; sizes: number[]; maxDelta: number; pot: number; stack: number; combo: string;
   expl: number; iters: number; solveMs: number; cached: boolean; heroReach: number;
+  /** Which tree answered: a turn+river solve ('turn') or a river-only solve ('river'); tier 'small' = reduced menu. */
+  solve: 'turn' | 'river'; tier: 'full' | 'small';
 }
 export interface DecisionResult {
   site: Site; hand_id: string; street: Street; actionIndex: number; nodePath: string; actionIdx: number;
@@ -64,8 +76,9 @@ combos.forEach(([a, b], h) => comboIdx.set(a * 52 + b, h));
 const idxOf = (a: number, b: number) => comboIdx.get(Math.min(a, b) * 52 + Math.max(a, b))!;
 const comboOfKey = (k: string) => idxOf(cardInt(k.slice(0, 2)), cardInt(k.slice(2)));
 
-function lineOf(hand: Hand, seat: number): Line {
-  const mine = hand.actions.filter((a) => a.seat === seat && (a.street === 'flop' || a.street === 'turn'));
+/** Line of `seat` on the given earlier streets: bet/raise beats call beats check. */
+export function lineOf(hand: Hand, seat: number, streets: Street[] = ['flop', 'turn']): Line {
+  const mine = hand.actions.filter((a) => a.seat === seat && streets.includes(a.street));
   return mine.some((a) => a.kind === 'bet' || a.kind === 'raise' || a.kind === 'allin') ? 'aggr' : mine.some((a) => a.kind === 'call') ? 'call' : 'check';
 }
 
@@ -79,18 +92,22 @@ export function narrow(list: number[], eq: number[], top: number, bluff: number)
 
 export interface Spot {
   preset: string; potType: PotType; heroOop: boolean; heroPos: string; villainPos: string; top: number; bluff: number;
-  ranges: [Record<string, number>, Record<string, number>]; hero: number; pot: number; stack: number; board: string; heroSeat: number;
+  ranges: [Record<string, number>, Record<string, number>]; hero: number; pot: number; stack: number; board: string; heroSeat: number; vilSeat: number;
 }
 
-/** Ranges and tree parameters for the river between hero and the one opponent, or the reason it cannot be built. */
-export function buildSpot(hand: Hand, ov: Overrides = {}): Spot | Reason {
-  const live = hand.seats.filter((s) => !hand.actions.some((a) => a.seat === s.seat && a.kind === 'fold' && a.street !== 'river')).map((s) => s.seat);
+/** Ranges and tree parameters for the turn or river between hero and the one opponent, or the reason it cannot be built. */
+export function buildSpot(hand: Hand, ov: Overrides = {}, street: 'turn' | 'river' = 'river'): Spot | Reason {
+  const later: Street[] = street === 'turn' ? ['turn', 'river'] : ['river'], earlier: Street[] = street === 'turn' ? ['flop'] : ['flop', 'turn'];
+  const live = hand.seats.filter((s) => !hand.actions.some((a) => a.seat === s.seat && a.kind === 'fold' && !later.includes(a.street))).map((s) => s.seat);
   if (live.length !== 2 || hand.hero === null || !live.includes(hand.hero) || !hand.hero_cards) return 'no_preset';
   const hs = hand.hero, vs = live.find((s) => s !== hs)!;
   const pre = presetFor(hand, hs, vs);
-  const rv = hand.pot_by_street.find((p) => p.street === 'river');
-  if (!pre || !rv) return 'no_preset';
-  const board = hand.board.map(cardInt);
+  const st = hand.pot_by_street.find((p) => p.street === street);
+  const bl = street === 'turn' ? 4 : 5;
+  if (!pre || !st || hand.board.length < bl) return 'no_preset';
+  const boardStr = hand.board.slice(0, bl);
+  const board = boardStr.map(cardInt);
+  const equities = street === 'turn' ? turnEquities : riverEquities;
   const hc = hand.hero_cards.map(cardInt), heroH = idxOf(hc[0], hc[1]);
   const list = (spec: string, drop: number[]) => Object.keys(rangeOf(spec)).map(comboOfKey)
     .filter((h) => ![...board, ...drop].some((c) => combos[h][0] === c || combos[h][1] === c));
@@ -98,8 +115,8 @@ export function buildSpot(hand: Hand, ov: Overrides = {}): Spot | Reason {
   const theirs = list(ov.villainRange ?? pre.spec[vs], hc);
   if (!mine.length || !theirs.length) return 'range_empty';
   const nar = (self: number[], opp: number[], seat: number) => {
-    const ln = NARROW[lineOf(hand, seat)], top = ov.width ?? ln.top;
-    return { h: narrow(self, riverEquities(board, self, opp), top, ln.bluff), top, bluff: ln.bluff };
+    const ln = NARROW[lineOf(hand, seat, earlier)], top = ov.width ?? ln.top;
+    return { h: narrow(self, equities(board, self, opp), top, ln.bluff), top, bluff: ln.bluff };
   };
   const nm = nar(mine, theirs, hs), nv = nar(theirs, mine, vs);
   const heroSet = new Set([...nm.h, heroH]);
@@ -113,11 +130,11 @@ export function buildSpot(hand: Hand, ov: Overrides = {}): Spot | Reason {
     return o;
   };
   const heroRange = sparse(heroSet), vilRange = sparse(nv.h);
-  const stack = Math.min(rv.stacks[hs], rv.stacks[vs]);
+  const stack = Math.min(st.stacks[hs], st.stacks[vs]);
   const custom = (ov.heroRange || ov.villainRange ? ':custom' : '') + (ov.width !== undefined ? `:w${Math.round(ov.width * 100)}` : '');
   return {
     preset: pre.name + custom, potType: pre.potType, heroOop: oopSeat === hs, heroPos: pos[hs], villainPos: pos[vs], top: nm.top, bluff: nm.bluff,
-    ranges: oopSeat === hs ? [heroRange, vilRange] : [vilRange, heroRange], hero: heroH, pot: rv.pot, stack, board: hand.board.join(' '), heroSeat: hs,
+    ranges: oopSeat === hs ? [heroRange, vilRange] : [vilRange, heroRange], hero: heroH, pot: st.pot, stack, board: boardStr.join(' '), heroSeat: hs, vilSeat: vs,
   };
 }
 
@@ -127,50 +144,128 @@ const skipped = (c: Candidate, status: Status, reason: Reason, preset = 'none'):
 });
 
 export interface Env {
-  backend: SolveBackend; overrides?: Overrides; params?: SolveParams;
+  backend: SolveBackend; overrides?: Overrides; params?: SolveParams; turnParams?: SolveParams; skipTurn?: boolean; // skipTurn: river decisions are always solved alone (H3 path)
+ 
   onProgress?: (expl: number, iters: number) => void; signal?: { aborted: boolean };
 }
 
-/** Analyse every hero decision of a hand. Only HU river decisions get EV; the rest carry their reason code. */
+type Tier = 'full' | 'small';
+const isSlow = (e: unknown) => /^timeout$|budget/.test(e instanceof Error ? e.message : String(e));
+interface StepLike { path: number[]; idx: number; n: number; player: 0 | 1; kind: ActionKind; frac: number; labels: string[] }
+interface Plan { step: StepLike; prefix: number[]; pot: number; sizes: number[]; delta: number; tSizes: number[]; rSizes: number[] }
+
+/**
+ * Analyse every hero decision of a hand. Heads-up turn decisions get EV from a turn+river solve; river decisions of a hand
+ * that was heads-up on the turn read the same solve (same config, so a cache hit). Everything else is river-only (H3) or
+ * carries its reason code.
+ */
 export async function analyzeHand(hand: Hand, env: Env): Promise<DecisionResult[]> {
   const cands = classify(hand);
-  const spot = cands.some((c) => c.reason === null) ? buildSpot(hand, env.overrides) : null;
-  const river = hand.actions.map((a, i) => ({ a, i })).filter((x) => x.a.street === 'river');
-  const out: DecisionResult[] = [];
-  for (const c of cands) {
-    if (c.reason) { out.push(skipped(c, 'unsupported', c.reason)); continue; }
-    if (env.signal?.aborted) throw new Error('cancelled');
-    if (typeof spot === 'string') { out.push(skipped(c, 'unsupported', spot)); continue; }
-    const s = spot!;
-    const seatPlayer = (seat: number): 0 | 1 => (seat === hand.hero ? (s.heroOop ? 0 : 1) : s.heroOop ? 1 : 0);
-    const upto = river.findIndex((x) => x.i === c.actionIndex);
-    const line: LineAction[] = river.slice(0, upto + 1).map(({ a }) => ({ player: seatPlayer(a.seat), kind: a.kind, to: a.amount_to }));
+  const byAction = new Map<number, DecisionResult>();
+  const acts = (street: Street) => hand.actions.map((a, i) => ({ a, i })).filter((x) => x.a.street === street);
+  const onTurn = acts('turn'), onRiver = acts('river');
+  const tspot = cands.some((c) => !c.reason) && !env.skipTurn ? buildSpot(hand, env.overrides, 'turn') : 'no_preset' as Reason;
+  const seatPlayer = (s: Spot) => (seat: number): 0 | 1 => (seat === hand.hero ? (s.heroOop ? 0 : 1) : s.heroOop ? 1 : 0);
+
+  /** Menus, tree path and pot of one decision in the turn+river tree for a tier; null = off-tree, 'none' = the turn solve cannot answer it. */
+  function plan(s: Spot, c: Candidate, tier: Tier): Plan | null | 'none' {
+    const [stdT, stdR] = tier === 'full' ? [STD_SIZES, RIVER_IN_TURN] : SMALL_MENU;
+    const seatP = seatPlayer(s), base = { pot: s.pot, stack: s.stack, cap: TURN_CAP };
+    const line = (list: typeof onTurn): LineAction[] => list.map(({ a }) => ({ player: seatP(a.seat), kind: a.kind, to: a.amount_to }));
+    const fullT = mapLine(line(onTurn), base, stdT);
+    // The whole river line, rescaled to the tree's river pot (it differs from the real one by the size-merge delta).
+    let fullR: MapResult | null = null, potR = 0;
+    const rv = hand.pot_by_street.find((p) => p.street === 'river');
+    if (fullT.ok && fullT.close !== null && onRiver.length && rv && tier === 'full') {
+      potR = s.pot + 2 * fullT.close;
+      const stackR = s.stack - fullT.close, ratio = potR / rv.pot, real = Math.min(rv.stacks[s.heroSeat], rv.stacks[s.vilSeat]);
+      fullR = mapLine(onRiver.map(({ a }) => ({ player: seatP(a.seat), kind: a.kind,
+        to: a.amount_to === null ? null : a.amount_to >= real - 1e-3 ? stackR : Math.min(stackR, a.amount_to * ratio) })), { pot: potR, stack: stackR, cap: TURN_CAP }, stdR);
+    }
+    const rSizes = fullR && fullR.ok ? fullR.sizes : stdR;
+    if (c.street === 'turn') {
+      const pos = onTurn.findIndex((x) => x.i === c.actionIndex);
+      const m = fullT.ok ? fullT : mapLine(line(onTurn.slice(0, pos + 1)), base, stdT);
+      if (!m.ok) return null;
+      return { step: m.steps[pos], prefix: [], pot: s.pot, sizes: m.sizes, delta: Math.max(0, ...m.steps.map((x) => x.delta)), tSizes: m.sizes, rSizes };
+    }
+    if (!fullT.ok || !fullR || !fullR.ok) return 'none';
+    const pos = onRiver.findIndex((x) => x.i === c.actionIndex);
+    return { step: fullR.steps[pos], prefix: [...fullT.steps.map((x) => x.idx), cardInt(hand.board[4])], pot: potR, sizes: fullR.sizes,
+      delta: Math.max(0, ...fullT.steps.map((x) => x.delta), ...fullR.steps.map((x) => x.delta)), tSizes: fullT.sizes, rSizes: fullR.sizes };
+  }
+
+  function finish(s: Spot, c: Candidate, step: StepLike, prefix: number[], pot: number, sizes: number[], maxDelta: number,
+    info: { cached: boolean; expl: number; iters: number; ms: number }, view: NodeView, solve: 'turn' | 'river', tier: Tier): DecisionResult {
+    if (view.kind !== 'action' || view.player !== step.player || view.n !== step.n || !view.action_ev || !view.opp_mass) return skipped(c, 'off_tree', 'off_tree', s.preset);
+    const small = tier === 'small';
+    return {
+      site: hand.site, hand_id: hand.hand_id, street: c.street, actionIndex: c.actionIndex,
+      nodePath: `a${c.actionIndex}/${[...prefix, ...step.path].join('.') || 'root'}/${step.labels.join('.')}`, actionIdx: step.idx,
+      status: small || info.expl > MAX_EXPL ? 'approx_only' : 'ok', reason: small ? 'turn_small_menu' : null,
+      solverFreqs: freqsFor(view.strategy, view.n, s.hero), evLoss: evLossPct(view.action_ev, view.opp_mass, view.n, s.hero, step.idx, pot),
+      rangePreset: s.preset, engineVer: ENGINE_VER,
+      meta: { kind: step.kind, frac: step.kind === 'bet' || step.kind === 'raise' || step.kind === 'allin' ? step.frac : null,
+        heroPos: s.heroPos, villainPos: s.villainPos, heroOop: s.heroOop, potType: s.potType, top: s.top, bluff: s.bluff, sizes, maxDelta, pot, stack: s.stack,
+        combo: hand.hero_cards!.join(''), expl: info.expl, iters: info.iters, solveMs: info.ms, cached: info.cached, heroReach: view.range[s.hero] ?? 0, solve, tier },
+    };
+  }
+
+  async function viaTurn(s: Spot, c: Candidate): Promise<DecisionResult | 'none'> {
+    let tier: Tier = 'full';
+    for (;;) {
+      const p = plan(s, c, tier);
+      if (p === 'none') return 'none';
+      if (!p) return skipped(c, 'off_tree', 'off_tree', s.preset);
+      const config = JSON.stringify({ board: s.board, ranges: s.ranges, iso: false, budget_mb: 1024,
+        streets: [{ pot: s.pot, stack: s.stack, sizes: p.tSizes, raise_cap: TURN_CAP }, { pot: s.pot, stack: s.stack, sizes: p.rSizes, raise_cap: TURN_CAP }] });
+      const key = configHash(config);
+      if (env.signal?.aborted) throw new Error('cancelled');
+      try {
+        if (tier === 'full' && slowKeys.has(key)) throw new Error('timeout');
+        const tp = env.turnParams ?? TURN_SOLVE; // the reduced menu is cheap, so only the full menu is time-boxed
+        const info = await env.backend.solve(key, config, tier === 'small' ? { ...tp, maxMs: undefined } : tp, env.onProgress);
+        const view = await env.backend.query(key, [...p.prefix, ...p.step.path]);
+        return finish(s, c, p.step, p.prefix, p.pot, p.sizes, p.delta, info, view, 'turn', tier);
+      } catch (e) {
+        if (e instanceof Error && e.message === 'cancelled') throw e;
+        if (!isSlow(e)) return skipped(c, 'unsupported', 'solve_failed', s.preset);
+        if (tier === 'small') return skipped(c, 'unsupported', 'solve_failed', s.preset);
+        slowKeys.add(key); tier = 'small';
+      }
+    }
+  }
+
+  // River-only (H3) path: river decisions without a usable turn solve.
+  let rspot: Spot | Reason | null = null;
+  async function riverOnly(c: Candidate): Promise<DecisionResult> {
+    rspot ??= buildSpot(hand, env.overrides, 'river');
+    if (typeof rspot === 'string') return skipped(c, 'unsupported', rspot);
+    const s = rspot;
+    const upto = onRiver.findIndex((x) => x.i === c.actionIndex);
+    const line: LineAction[] = onRiver.slice(0, upto + 1).map(({ a }) => ({ player: seatPlayer(s)(a.seat), kind: a.kind, to: a.amount_to }));
     const map = mapLine(line, { pot: s.pot, stack: s.stack, cap: RAISE_CAP });
-    if (!map.ok) { out.push(skipped(c, 'off_tree', 'off_tree', s.preset)); continue; }
+    if (!map.ok) return skipped(c, 'off_tree', 'off_tree', s.preset);
     const step = map.steps[map.steps.length - 1];
     const config = JSON.stringify({ board: s.board, ranges: s.ranges, streets: [{ pot: s.pot, stack: s.stack, sizes: map.sizes, raise_cap: RAISE_CAP }], budget_mb: 1024 });
     const key = configHash(config);
-    let info, view;
     try {
-      info = await env.backend.solve(key, config, env.params ?? SOLVE, env.onProgress);
-      view = await env.backend.query(key, step.path);
+      const info = await env.backend.solve(key, config, env.params ?? SOLVE, env.onProgress);
+      const view = await env.backend.query(key, step.path);
+      return finish(s, c, step, [], s.pot, map.sizes, Math.max(0, ...map.steps.map((x) => x.delta)), info, view, 'river', 'full');
     } catch (e) {
       if (e instanceof Error && e.message === 'cancelled') throw e;
-      out.push(skipped(c, 'unsupported', 'solve_failed', s.preset)); continue;
+      return skipped(c, 'unsupported', 'solve_failed', s.preset);
     }
-    if (view.kind !== 'action' || view.player !== step.player || view.n !== step.n || !view.action_ev || !view.opp_mass) {
-      out.push(skipped(c, 'off_tree', 'off_tree', s.preset)); continue;
-    }
-    const freqs = freqsFor(view.strategy, view.n, s.hero);
-    const evLoss = evLossPct(view.action_ev, view.opp_mass, view.n, s.hero, step.idx, s.pot);
-    out.push({
-      site: hand.site, hand_id: hand.hand_id, street: 'river', actionIndex: c.actionIndex, nodePath: step.path.join('.') || 'root', actionIdx: step.idx,
-      status: info.expl > MAX_EXPL ? 'approx_only' : 'ok', reason: null, solverFreqs: freqs, evLoss, rangePreset: s.preset, engineVer: ENGINE_VER,
-      meta: { kind: step.kind, frac: step.kind === 'bet' || step.kind === 'raise' || step.kind === 'allin' ? step.frac : null,
-        heroPos: s.heroPos, villainPos: s.villainPos, heroOop: s.heroOop, potType: s.potType, top: s.top, bluff: s.bluff, sizes: map.sizes,
-        maxDelta: Math.max(0, ...map.steps.map((x) => x.delta)), pot: s.pot, stack: s.stack, combo: hand.hero_cards!.join(''),
-        expl: info.expl, iters: info.iters, solveMs: info.ms, cached: info.cached, heroReach: view.range[s.hero] ?? 0 },
-    });
   }
-  return out;
+
+  for (const c of cands) {
+    if (c.reason) { byAction.set(c.actionIndex, skipped(c, 'unsupported', c.reason)); continue; }
+    if (env.signal?.aborted) throw new Error('cancelled');
+    let r: DecisionResult | 'none' = 'none';
+    if (typeof tspot !== 'string') r = await viaTurn(tspot, c);
+    else if (c.street === 'turn') { byAction.set(c.actionIndex, skipped(c, 'unsupported', tspot)); continue; }
+    byAction.set(c.actionIndex, r === 'none' ? await riverOnly(c) : r);
+  }
+  return cands.map((c) => byAction.get(c.actionIndex)!);
 }
