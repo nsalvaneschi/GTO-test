@@ -53,6 +53,13 @@ export function evLossPct(actionEv: ArrayLike<number>, oppMass: ArrayLike<number
 /** Same rule as the server: correct when the solver plays the chosen action >= 10% of the time. */
 export const isCorrect = (freqs: number[], action: number) => freqs[action] >= 0.1;
 
+/** Close-call threshold: an action the solver plays < 10% of the time but that loses less than this % of the pot in EV. */
+export const CLOSE_EV_LOSS = 0.5;
+export type Verdict = 'correct' | 'close' | 'mistake';
+/** Three-level verdict for the UI only (the server's accuracy still counts just `isCorrect`). */
+export const verdictOf = (freqs: number[], action: number, evLoss: number): Verdict =>
+  isCorrect(freqs, action) ? 'correct' : evLoss < CLOSE_EV_LOSS ? 'close' : 'mistake';
+
 export type NodeType = 'root' | 'after-check' | 'facing-bet' | 'facing-raise';
 export interface Step { player: number; kind: 'check' | 'bet' | 'fold' | 'call' | 'raise'; size: number } // size = index into bet sizes (-1 = none)
 export interface NodeLike { kind: string; player: number; n: number; strategy: ArrayLike<number>; range: ArrayLike<number> }

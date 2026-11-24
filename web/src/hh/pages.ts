@@ -12,7 +12,7 @@ type Tab = 'import' | 'hands';
 const P = {
   tab: 'import' as Tab, filters: { site: '', from: '', to: '', status: '', street: '', minEvLoss: '' } as HhFilters, offset: 0,
   list: null as { total: number; hands: HhHandRow[] } | null, loading: false, err: '',
-  replay: null as { hand: HhHandFull; step: number } | null, confirm: '' as '' | 'hands' | 'all', msg: '',
+  replay: null as { hand: HhHandFull; step: number } | null, confirm: '' as '' | 'hands' | 'all', msg: '', opener: '',
 };
 const PAGE = 20;
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!));
@@ -47,7 +47,7 @@ export function renderHands(el: HTMLElement, c: Ctx, toImport: () => void) {
   const rows = (L?.hands ?? []).map((h) => `<article class="hand-card" data-id="${h.id}" data-hand="${esc(h.handId)}"><div class="top"><span class="id" title="${esc(h.handId)}">${esc(h.handId)}</span><span class="pill">${tr(('hh.site.' + h.site) as Key)}</span></div>
     <div class="row muted small"><span>${dt.format(new Date(h.playedAt * 1000))}</span>${h.heroPos ? `<span class="pill ok">${esc(h.heroPos)}</span>` : ''}</div><button data-open="${h.id}">${tr('hh.list.open')}</button></article>`).join('');
   const total = L?.total ?? 0;
-  const conf = P.confirm ? `<div class="modal-back"><div id="hh-confirm" class="modal" role="alertdialog" aria-modal="true" aria-labelledby="hh-confirm-text" data-kind="${P.confirm}"><p id="hh-confirm-text">${tr(P.confirm === 'hands' ? 'hh.data.confirmHands' : 'hh.data.confirmAll')}</p>
+  const conf = P.confirm ? `<div class="modal-back" id="hh-confirm-back" tabindex="-1"><div id="hh-confirm" class="modal" role="alertdialog" aria-modal="true" aria-labelledby="hh-confirm-text" data-kind="${P.confirm}"><p id="hh-confirm-text">${tr(P.confirm === 'hands' ? 'hh.data.confirmHands' : 'hh.data.confirmAll')}</p>
     <div class="row"><button id="hh-confirm-no">${tr('hh.cancel')}</button><button id="hh-confirm-yes" class="danger">${tr('hh.data.confirm')}</button></div></div></div>` : '';
   el.innerHTML = `${head}
     <div id="hh-filters" class="panel toolbar">
@@ -77,18 +77,29 @@ export function renderHands(el: HTMLElement, c: Ctx, toImport: () => void) {
     try { P.replay = { hand: await api.hhGet(+b.dataset.open!), step: 0 }; P.err = ''; } catch (e) { P.err = c.errText(c.codeOf(e)); }
     rerender();
   }; });
-  document.getElementById('hh-del-hands')!.onclick = () => { P.confirm = 'hands'; P.msg = ''; rerender(); };
-  document.getElementById('hh-del-all')!.onclick = () => { P.confirm = 'all'; P.msg = ''; rerender(); };
+  document.getElementById('hh-del-hands')!.onclick = () => { P.confirm = 'hands'; P.opener = 'hh-del-hands'; P.msg = ''; rerender(); };
+  document.getElementById('hh-del-all')!.onclick = () => { P.confirm = 'all'; P.opener = 'hh-del-all'; P.msg = ''; rerender(); };
   const no = document.getElementById('hh-confirm-no');
-  no?.focus();
-  if (no) no.onclick = () => { P.confirm = ''; rerender(); };
   const yes = document.getElementById('hh-confirm-yes');
+  const restore = () => document.getElementById(P.opener)?.focus(); // return focus to the button that opened the dialog
+  const close = () => { P.confirm = ''; rerender(); restore(); };
+  no?.focus();
+  if (no) no.onclick = close;
+  // Escape closes; Tab / Shift+Tab cycle inside the dialog (focus trap).
+  document.getElementById('hh-confirm-back')?.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') { e.preventDefault(); close(); return; }
+    if (e.key !== 'Tab' || !no || !yes) return;
+    const first = no, last = yes;
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    else if (!(document.activeElement === first || document.activeElement === last)) { e.preventDefault(); first.focus(); }
+  });
   if (yes) yes.onclick = async () => {
     try {
       const r = P.confirm === 'all' ? await api.deleteMyData() : await api.hhDeleteAll();
       P.msg = tr('hh.data.done', { hands: r.hands, decisions: r.decisions }); P.err = '';
     } catch (e) { P.err = c.errText(c.codeOf(e)); }
-    P.confirm = ''; P.list = null; rerender();
+    P.confirm = ''; P.list = null; rerender(); restore();
   };
 }
 

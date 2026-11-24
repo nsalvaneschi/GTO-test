@@ -7,6 +7,7 @@ import { parseHistory } from './parse';
 import type { ParseSummary } from './types';
 import { parseNodePath, labelKey } from './replay';
 import { bindTabs, currentTab, invalidate, renderHands, tabsHtml } from './pages';
+import { engineErrKey } from '../validate';
 import { uploadAll } from './upload';
 import { WorkerBackend } from './workerBackend';
 
@@ -18,6 +19,7 @@ export interface Ctx {
   codeOf: (e: unknown) => string;
 }
 
+const MAX_TEXT = 2_000_000; // chars; larger pastes are refused instead of freezing the tab
 const S = {
   text: '', width: '', heroRange: '', villRange: '', parsed: null as ParseSummary | null,
   results: new Map<string, DecisionResult[]>(), phase: 'idle' as 'idle' | 'solving' | 'done', n: 0, total: 0, cancelled: false,
@@ -93,7 +95,8 @@ export function renderHh(el: HTMLElement, c: Ctx) {
   const readInputs = () => { S.text = val('hh-text'); S.width = val('hh-width'); S.heroRange = val('hh-hero-range'); S.villRange = val('hh-vill-range'); };
   ['hh-text', 'hh-width', 'hh-hero-range', 'hh-vill-range'].forEach((id) => { document.getElementById(id)!.oninput = readInputs; });
   document.getElementById('hh-parse')!.onclick = () => {
-    readInputs(); S.parsed = parseHistory(S.text); S.results = new Map(); S.cancelled = false; S.err = ''; S.upMsg = S.upErr = '';
+    readInputs(); S.results = new Map(); S.cancelled = false; S.err = ''; S.upMsg = S.upErr = '';
+    if (S.text.length > MAX_TEXT) { S.parsed = null; S.err = tr('hh.tooLarge'); } else S.parsed = parseHistory(S.text);
     renderHh(el, c);
   };
   document.getElementById('hh-analyse')!.onclick = async () => {
@@ -111,7 +114,7 @@ export function renderHh(el: HTMLElement, c: Ctx) {
         S.results.set(key(h.site, h.hand_id), await analyzeHand(h, { backend, overrides, signal, onProgress: (expl, iters) => { S.expl = expl; S.iters = iters; progressUpdate(c); } }));
       }
     } catch (e) {
-      if (e instanceof Error && e.message === 'cancelled') S.cancelled = true; else S.err = String(e);
+      if (e instanceof Error && e.message === 'cancelled') S.cancelled = true; else S.err = c.tr(engineErrKey(String(e instanceof Error ? e.message : e)));
     }
     S.phase = 'done';
     renderHh(el, c);

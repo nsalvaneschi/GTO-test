@@ -4,7 +4,8 @@ import { t, fmt, locales, type Lang, type Key } from './i18n';
 import { parseRange, presets, R } from './ranges';
 import { api, ApiError, type HhProgress, type Progress } from './api';
 import { renderHh } from './hh/screen';
-import { H, combos, comboName, stepOf, cardName, randomBoard, freqsFor, evLossPct, isCorrect, spotId, samplePath, type Street, nodeType, isFacing, type Step, type NodeType, SUITS, RANKS } from './drill';
+import { engineErrKey, normalizeBoard, validChips } from './validate';
+import { H, combos, comboName, stepOf, cardName, randomBoard, freqsFor, evLossPct, isCorrect, verdictOf, spotId, samplePath, type Street, nodeType, isFacing, type Step, type NodeType, SUITS, RANKS } from './drill';
 
 // Bet sizes sent to the engine; labels derive from these (NodeView has no size info, so this assumes none are merged/dropped, e.g. at all-in).
 const sizes = [0.5, 1];
@@ -48,7 +49,7 @@ worker.onmessage = (e) => {
     if (owner === 'drill') { pend.get(JSON.stringify(m.path))?.(m.view); return; }
     view = m.view; renderGrid();
   }
-  else if (m.type === 'error') { solving = false; if (owner === 'drill') drill.phase = 'idle'; err = m.message; render(); }
+  else if (m.type === 'error') { solving = false; if (owner === 'drill') drill.phase = 'idle'; err = engineErrKey(String(m.message)); render(); }
 };
 const pend = new Map<string, (v: View) => void>();
 const queryAsync = (p: number[]) => new Promise<View>((res) => { pend.set(JSON.stringify(p), res); worker.postMessage({ type: 'query', path: p }); });
@@ -73,6 +74,7 @@ function actions(v: View, fac: boolean): { key: Key; vars?: Record<string, strin
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const tr = (k: Key, v?: Record<string, string | number>) => t(lang, k, v);
 const pctF = (x: number, d = 0) => fmt(x, lang, { style: 'percent', minimumFractionDigits: d, maximumFractionDigits: d });
+const errMsg = () => (/^(solver|engine)\.err\./.test(err) ? tr(err as Key) : tr('error', { message: err }));
 const ofPot = (pctPot: number) => tr('unit.ofPot', { value: pctF(pctPot / 100, 2) });
 
 // Theme: stored choice, else the OS preference, else dark. Storage may be blocked, hence the try/catch.
@@ -88,10 +90,11 @@ function render() {
   const who = user
     ? `<span class="who" id="whoami" data-user="${esc(user)}"><b class="avatar">${esc(user[0] ?? '?')}</b><span class="who-text">${esc(tr('auth.loggedAs', { name: user }))}</span></span><button id="logout" class="ghost" aria-label="${tr('auth.logout')}" title="${tr('auth.logout')}">${icon.logout}<span class="lbl">${tr('auth.logout')}</span></button>`
     : `<button data-nav="auth" id="to-auth" class="primary">${tr('auth.login')}</button>`;
-  const pageTitle = `${tr('app.name')} - ${tr(screen === 'auth' ? 'auth.login' : (('nav.' + screen) as Key))}`;
+  const pageName = tr(screen === 'auth' ? 'auth.login' : (('nav.' + screen) as Key));
+  const pageTitle = `${tr('app.name')} - ${pageName}`;
   document.title = pageTitle;
   $('app').innerHTML = `<div class="shell">
-  <header class="topbar"><div class="brand">${icon.logo}<h1 id="title">${pageTitle}</h1></div>
+  <header class="topbar"><div class="brand">${icon.logo}<h1 id="title" title="${esc(pageTitle)}"><span class="app">${tr('app.name')}<span class="sep"> - </span></span><span class="pg">${pageName}</span></h1></div>
   <div class="top-actions"><select id="lang" aria-label="${tr('language')}" title="${tr('language')}">${(Object.keys(locales) as Lang[]).map((l) => `<option value="${l}" ${l === lang ? 'selected' : ''}>${l}</option>`).join('')}</select>
   <button id="theme" class="ghost icon" aria-label="${tr('theme.toggle')}" title="${tr('theme.toggle')}">${icon.theme}</button>${who}</div></header>
   <nav class="side" aria-label="${tr('nav.main')}">${nav}</nav><main id="screen"></main></div>`;
@@ -108,7 +111,9 @@ function render() {
 }
 
 function go(s: Screen) {
-  readForm(); screen = s; authErr = ''; if (s === 'progress') progTab = 'drills';
+  readForm();
+  if (s !== 'drill' && drill.phase === 'solving') { worker.postMessage({ type: 'cancel' }); drill.phase = 'idle'; } // leaving mid-solve: stop the work
+  screen = s; authErr = ''; if (s === 'progress') progTab = 'drills';
   if (s === 'progress' && user) { progress = 'loading'; api.progress().then((p) => { progress = p; if (screen === 'progress') render(); }, (e) => { progress = null; handleApiErr(e); }); }
   render();
 }
@@ -205,7 +210,7 @@ function answer(i: number) {
   render();
   api.postResult({ spotId: spotId(drill.board, drill.oop, drill.ip, nodeType(drill.steps), drill.path, drill.street), hero: v.player, handCombo: comboName(drill.h), action: i,
     solverFreqs: drill.freqs, evLoss: drill.evLoss, ms, lang }).catch((e) => {
-    if (e instanceof ApiError && e.status === 401) { handleApiErr(e); return; }
+    if (e instanceof ApiError && e.status === 401) { user = null; screen = 'auth'; authErr = 'session'; render(); return; }
     drill.saveErr = errText(codeOf(e)); const el = document.getElementById('save-err'); if (el) el.textContent = drill.saveErr;
   });
 }
@@ -219,7 +224,7 @@ function renderDrill() {
     ? `<div class="panel" id="session" data-correct="${drill.correct}" data-total="${drill.total}"><div class="big">${pctF(drill.correct / drill.total)}</div><div class="small muted">${tr('drill.session', { correct: drill.correct, total: drill.total, pct: pctF(drill.correct / drill.total) })}</div></div>` : '';
   if (drill.phase === 'idle') {
     el.innerHTML = `<div class="panel"><div class="toolbar"><label>${tr('drill.street')}<select id="street">${(['river', 'turn'] as const).map((s) => `<option value="${s}" ${s === drill.street ? 'selected' : ''}>${tr(('street.' + s) as Key)}</option>`).join('')}</select></label>
-      <button id="start" class="primary">${tr('drill.start')}</button></div><div class="err">${err ? esc(tr('error', { message: err })) : ''}</div></div>${sessionPanel() ? `<div class="stack" style="margin-top:var(--s-4);max-width:340px">${sessionPanel()}</div>` : ''}`;
+      <button id="start" class="primary">${tr('drill.start')}</button></div><div class="err">${err ? esc(errMsg()) : ''}</div></div>${sessionPanel() ? `<div class="stack" style="margin-top:var(--s-4);max-width:340px">${sessionPanel()}</div>` : ''}`;
     $('start').onclick = startDrill;
     $<HTMLSelectElement>('street').onchange = (e) => { drill.street = (e.target as HTMLSelectElement).value as Street; };
     return;
@@ -246,11 +251,11 @@ function renderDrill() {
     el.querySelectorAll<HTMLButtonElement>('button[data-a]').forEach((b) => b.onclick = () => answer(+b.dataset.a!));
     return;
   }
-  const ok = isCorrect(drill.freqs, drill.chosen);
+  const vd = verdictOf(drill.freqs, drill.chosen, drill.evLoss);
   const chosen = tr(as[drill.chosen].key, as[drill.chosen].vars);
   el.innerHTML = `<div class="workspace"><div class="stack">${head}<div class="panel"><div class="panel-title">${tr('drill.grid')}</div>${matrixShell()}</div></div>
     <aside class="side-panel">${hand}
-      <div id="result" class="verdict ${ok ? 'right' : 'wrong'}" data-correct="${ok}" data-evloss="${drill.evLoss}" data-chosen="${drill.chosen}" style="margin-top:var(--s-3)"><span class="${ok ? 'ok' : 'bad'}">${ok ? icon.check : icon.cross}</span><div><b class="${ok ? 'ok' : 'bad'}">${tr(ok ? 'drill.correct' : 'drill.mistake')}</b><div class="small muted">${tr('drill.youChose', { action: chosen })}</div></div></div>
+      <div id="result" class="verdict ${vd === 'correct' ? 'right' : vd === 'close' ? 'close' : 'wrong'}" data-verdict="${vd}" data-correct="${vd === 'correct'}" data-evloss="${drill.evLoss}" data-chosen="${drill.chosen}" style="margin-top:var(--s-3)"><span class="${vd === 'correct' ? 'ok' : 'bad'}">${vd === 'mistake' ? icon.cross : icon.check}</span><div><b class="${vd === 'correct' ? 'ok' : 'bad'}">${tr(('drill.' + (vd === 'mistake' ? 'mistake' : vd)) as Key)}</b><div class="small muted">${tr('drill.youChose', { action: chosen })}</div></div></div>
       <div class="kv"><span>${tr('drill.evLoss')}</span><span>${ofPot(drill.evLoss)}</span></div>
       <div id="save-err" class="err">${esc(drill.saveErr)}</div>
       <div class="row" style="margin-top:var(--s-3)"><button id="next" class="primary">${tr('drill.next')}</button></div></div>
@@ -270,6 +275,28 @@ const emptyBox = (id: string, text: string) => `<div class="empty">${icon.inbox}
 const loadingBox = () => `<div class="loading-line"><span class="spinner" role="status"></span>${tr('progress.loading')}</div><div class="err">${authErr ? errText(authErr) : ''}</div>`;
 const tile = (label: string, id: string, value: number | null, html: string) => `<div class="tile"><div class="l">${label}</div><div class="v" id="${id}" data-value="${value}">${html}</div></div>`;
 
+/** Change password / delete account, shown under the progress tabs. */
+function accountHtml() {
+  return `<details id="acct" class="panel" style="margin-top:var(--s-4)"><summary>${tr('acct.title')}</summary>
+    <label>${tr('acct.current')}<input id="acct-cur" type="password" autocomplete="current-password" maxlength="128"></label>
+    <label>${tr('acct.new')}<input id="acct-new" type="password" autocomplete="new-password" maxlength="128"></label>
+    <div class="row" style="margin-top:var(--s-3)"><button id="acct-change">${tr('acct.change')}</button><button id="acct-delete" class="danger">${tr('acct.delete')}</button></div>
+    <div id="acct-msg" class="ok"></div><div id="acct-err" class="err"></div></details>`;
+}
+function bindAccount() {
+  const val = (id: string) => $<HTMLInputElement>(id).value;
+  const show = (ok: string, bad: string) => { $('acct-msg').textContent = ok; $('acct-err').textContent = bad; };
+  $('acct-change').onclick = async () => {
+    try { await api.changePassword(val('acct-cur'), val('acct-new')); show(tr('acct.changed'), ''); $<HTMLInputElement>('acct-cur').value = $<HTMLInputElement>('acct-new').value = ''; }
+    catch (e) { show('', errText(codeOf(e))); }
+  };
+  $('acct-delete').onclick = async () => {
+    if (!confirm(tr('acct.deleteConfirm'))) return;
+    try { await api.deleteAccount(val('acct-cur')); user = null; progress = null; hhProg = null; drill.phase = 'idle'; drill.correct = drill.total = 0; go('auth'); authErr = ''; }
+    catch (e) { show('', errText(codeOf(e))); }
+  };
+}
+
 function renderProgress() {
   if (!user) return needLogin();
   $('screen').innerHTML = `<nav id="prog-tabs" class="tabs">${(['drills', 'hh'] as const).map((t) => `<button data-ptab="${t}" class="${progTab === t ? 'on' : ''}" aria-pressed="${progTab === t}">${tr(('hh.prog.tab.' + t) as Key)}</button>`).join('')}</nav><div id="prog-body"></div>`;
@@ -279,6 +306,7 @@ function renderProgress() {
     render();
   });
   const el = $('prog-body');
+  el.insertAdjacentHTML('afterend', accountHtml()); bindAccount();
   if (progTab === 'hh') return renderHhProgress(el);
   if (progress === 'loading' || !progress) { el.innerHTML = loadingBox(); return; }
   const p = progress;
@@ -332,7 +360,7 @@ function renderSolver() {
     <label>${tr('oop')}<select id="oop">${opt(form.oop)}</select></label>
     <label>${tr('ip')}<select id="ip">${opt(form.ip)}</select></label>
     <button id="solve" class="primary ${solving ? 'loading' : ''}" ${solving ? 'disabled' : ''}>${solving ? tr('solving') : tr('solve')}</button>
-  </div><div id="status" class="status"></div><div id="err" class="err">${err ? esc(tr('error', { message: err })) : ''}</div></section>
+  </div><div id="status" class="status"></div><div id="err" class="err">${err ? esc(errMsg()) : ''}</div></section>
   <div class="workspace"><div class="stack">
     <div class="panel"><div class="board-row"><div><div class="panel-title">${tr('board')}</div><span class="cards">${boardTiles(form.board)}</span></div>
       <div><div class="panel-title">${tr('seq.title')}</div><div id="seq" class="seq"></div></div></div>
@@ -353,7 +381,12 @@ function readForm() {
 }
 
 function solve() {
+  if (solving) return;
   readForm();
+  const b = normalizeBoard(form.board);
+  const bad = !b.ok ? 'solver.err.' + b.err : !validChips(form.pot) || !validChips(form.stack) ? 'solver.err.chips' : '';
+  if (bad) { err = bad; render(); return; }
+  form.board = b.ok ? b.board : form.board;
   err = ''; view = null; path = []; facing = [false]; seq = []; sel = -1; expl = null; iters = 0; solving = true; owner = 'solver'; drill.phase = 'idle';
   const config = JSON.stringify({
     board: form.board,
@@ -423,16 +456,20 @@ let sel = -1;
 let cellData: { as: ReturnType<typeof actions>; n: number; w: Float64Array; f: Float64Array; ev: Float64Array | null; names: string[] } | null = null;
 function bindMatrix(grid: HTMLElement) {
   const cellOf = (e: Event) => (e.target as HTMLElement).closest<HTMLElement>('.c');
-  const pin = (ix: number) => { sel = ix; grid.querySelector('.sel')?.classList.remove('sel'); grid.children[ix]?.classList.add('sel'); renderHandInfo(); };
+  let cur = sel;
+  const pin = (ix: number) => { sel = cur = ix; grid.querySelector('.sel')?.classList.remove('sel'); grid.children[ix]?.classList.add('sel'); renderHandInfo(); };
   grid.onmouseover = (e) => { const c = cellOf(e); if (c) renderHandInfo(+c.dataset.ix!); };
   grid.onmouseleave = () => renderHandInfo();
   grid.onclick = (e) => { const c = cellOf(e); if (c) pin(+c.dataset.ix!); };
+  // Keyboard: arrows move a visible cursor (hand info previews), Enter/Space pins the cursor cell like a click.
+  const focusCell = (ix: number) => { cur = ix; grid.querySelector('.foc')?.classList.remove('foc'); grid.children[ix]?.classList.add('foc'); grid.setAttribute('aria-activedescendant', 'cell-' + ix); renderHandInfo(ix); };
   grid.onkeydown = (e) => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pin(cur < 0 ? 0 : cur); return; }
     const d = ({ ArrowLeft: [0, -1], ArrowRight: [0, 1], ArrowUp: [-1, 0], ArrowDown: [1, 0] } as Record<string, number[]>)[e.key];
     if (!d) return;
     e.preventDefault();
-    const cur = sel < 0 ? 0 : sel, r = Math.min(12, Math.max(0, Math.floor(cur / 13) + d[0])), c = Math.min(12, Math.max(0, (cur % 13) + d[1]));
-    pin(sel < 0 ? 0 : r * 13 + c);
+    const base = cur < 0 ? 0 : cur, r = Math.min(12, Math.max(0, Math.floor(base / 13) + d[0])), c = Math.min(12, Math.max(0, (base % 13) + d[1]));
+    focusCell(cur < 0 ? 0 : r * 13 + c);
   };
   if (sel >= 0) grid.children[sel]?.classList.add('sel');
 }
@@ -488,7 +525,7 @@ function gridHtml(v: View, as: ReturnType<typeof actions>, mark = -1): string {
       }
       style = ` style="background:linear-gradient(to right, ${stops.join(',')})"`;
     }
-    html += `<div class="c${w[idx] > 1e-6 ? '' : ' nr'}${name === markName ? ' me' : ''}" data-hand="${name}" data-ix="${idx}" title="${name}"${style}>${name}</div>`;
+    html += `<div class="c${w[idx] > 1e-6 ? '' : ' nr'}${name === markName ? ' me' : ''}" id="cell-${idx}" data-hand="${name}" data-ix="${idx}" title="${name}"${style}>${name}</div>`;
   }
   cellData = { as, n: v.n, w, f, ev, names };
   return html;
@@ -497,3 +534,5 @@ function gridHtml(v: View, as: ReturnType<typeof actions>, mark = -1): string {
 applyTheme();
 document.documentElement.lang = lang;
 render();
+// Restore the session after a reload (httpOnly cookie): only touch the UI if nothing else has happened meanwhile.
+api.me().then((m) => { if (!user && screen !== 'auth') { readForm(); user = m.username; render(); } }, () => { /* not logged in or offline: stay logged out */ });
