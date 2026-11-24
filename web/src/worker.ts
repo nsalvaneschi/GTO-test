@@ -21,6 +21,7 @@ self.onmessage = async (e: MessageEvent) => {
         await new Promise((r) => setTimeout(r, 0)); // let new messages in
       }
       if (id === run) post({ type: 'done', expl, iters });
+    } else if (m.type === 'cancel') { run++;
     } else if (m.type === 'query' && solver) {
       post({ type: 'node', path: m.path, view: JSON.parse(solver.query(JSON.stringify(m.path))) });
     }

@@ -123,3 +123,35 @@ test('real engine: sampled non-root nodes are valid and consistent', async () =>
   console.log('node types sampled:', [...types]);
   expect(types.size).toBeGreaterThan(1);
 });
+
+test('turn: 4-card boards and turn spot ids', () => {
+  for (let i = 0; i < 50; i++) expect(new Set(randomBoard(Math.random, undefined, 4).split(' ')).size).toBe(4);
+  expect(spotId('As Kd 7c 4h', 'a', 'b', 'root', [], 'turn')).toBe('turn:root:AsKd7c4h:a-b:root');
+});
+
+test('real engine turn tree: sampler stops at chance nodes, never passes through the river card, masks board', async () => {
+  await init({ module_or_path: readFileSync(new URL('../src/wasm/gto_wasm_bg.wasm', import.meta.url)) });
+  const s = new Solver(JSON.stringify({ board: 'As Kd 7c 4h', ranges: [parseRange(presets.mixed), parseRange(presets.mixed)],
+    streets: [{ pot: 10, stack: 50, sizes: [0.5, 1], raise_cap: 1 }, { pot: 10, stack: 50, sizes: [0.5], raise_cap: 1 }], budget_mb: 1024 }));
+  s.step(30);
+  const kinds: string[] = [];
+  const q = async (p: number[]) => { const v = JSON.parse(s.query(JSON.stringify(p))); kinds.push(v.kind); return v; };
+  expect(JSON.parse(s.query('[0,0]')).kind).toBe('chance'); // check-check deals the river
+  const board = [51, 46, 21, 14];
+  const rng = lcg(21), types = new Set<string>();
+  for (let i = 0; i < 80; i++) {
+    const r = await samplePath(q, board, rng, 0.3);
+    types.add(nodeType(r.steps));
+    expect(r.view.kind).toBe('action');
+    expect(r.path.length).toBe(r.steps.length); // only action indices: no card id, so no river street
+    // every prefix of the path is an action node (a chance node would mean the walk crossed into the river)
+    for (let d = 0; d < r.path.length; d++) expect(JSON.parse(s.query(JSON.stringify(r.path.slice(0, d + 1)))).kind === 'action' || d === r.path.length - 1).toBe(true);
+    expect(combos[r.h].some((c) => board.includes(c))).toBe(false);
+    expect(r.view.range[r.h]).toBeGreaterThan(0);
+    const losses = freqsFor(r.view.strategy, r.view.n, r.h).map((_, k) => evLossPct(r.view.action_ev, r.view.opp_mass, r.view.n, r.h, k, 10));
+    expect(Math.min(...losses)).toBe(0);
+    expect(Math.max(...losses)).toBeLessThan(700); // chips per unit deal (opp_mass counts river deals): bounded by pot+stack = 60 chips
+  }
+  expect(kinds).toContain('chance'); // walks did hit chance nodes and stopped there
+  expect(types.size).toBeGreaterThan(1);
+}, 60000);

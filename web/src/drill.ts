@@ -14,11 +14,12 @@ export function comboName(h: number): string {
 
 export const presetBoards = ['As Kd 7c 4h 2s', 'Qh Jh 5d 5c 2s', 'Td 9d 8s 3c Ah', '7s 7d 2c Kh 9c', 'Jc 8h 4d Ts 6h', 'Ac Kc Qd 3h 9s'];
 
-export function randomBoard(rng: () => number = Math.random, presets = presetBoards): string {
-  if (rng() < 0.5) return presets[Math.floor(rng() * presets.length)];
+/** `len` = 5 (river) or 4 (turn: first four cards of a preset / random). */
+export function randomBoard(rng: () => number = Math.random, presets = presetBoards, len = 5): string {
+  if (rng() < 0.5) return presets[Math.floor(rng() * presets.length)].split(' ').slice(0, len).join(' ');
   const deck = Array.from({ length: 52 }, (_, i) => i);
   const out: string[] = [];
-  for (let i = 0; i < 5; i++) out.push(cardName(deck.splice(Math.floor(rng() * deck.length), 1)[0]));
+  for (let i = 0; i < len; i++) out.push(cardName(deck.splice(Math.floor(rng() * deck.length), 1)[0]));
   return out.join(' ');
 }
 
@@ -100,5 +101,6 @@ export async function samplePath<V extends NodeLike>(query: (path: number[]) => 
   return { path, steps, view, h: sampleHand(maskBoard(view.range, board), rng) };
 }
 
-export const spotId = (board: string, oop: string, ip: string, type: NodeType = 'root', path: number[] = []) =>
-  `river:${type}:${board.replace(/\s+/g, '')}:${oop}-${ip}:${path.join('.') || 'root'}`;
+export type Street = 'river' | 'turn';
+export const spotId = (board: string, oop: string, ip: string, type: NodeType = 'root', path: number[] = [], street: Street = 'river') =>
+  `${street}:${type}:${board.replace(/\s+/g, '')}:${oop}-${ip}:${path.join('.') || 'root'}`;

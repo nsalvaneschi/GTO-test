@@ -12,6 +12,9 @@
 | range | rango | range |
 | board | tablero | board |
 | river | river | river |
+| turn | turn | turn |
+| street | calle | street |
+| cancel | cancelar | annulla |
 | exploitability | explotabilidad | sfruttabilità |
 | OOP / IP | OOP / IP | OOP / IP |
 | drill | práctica | esercizio |

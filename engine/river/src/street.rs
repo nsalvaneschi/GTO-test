@@ -444,6 +444,9 @@ pub struct StreetSolver {
     w: [Vec<f32>; 2],
     norm: f32,
     pot: f32,
+    /// Board cards (bitmask) and number of chance streets below the root.
+    dead0: u64,
+    left0: usize,
     regret: Arr,
     sum: Arr,
     params: Params,
@@ -499,7 +502,7 @@ impl StreetSolver {
             nodes, children, chances, boards, bmaps, root, card_hands: (0..52u8).map(|c| (0..H as u16).filter(|&h| { let (a, b) = cb[h as usize]; a == c || b == c }).collect()).collect(),
             ident: (0..H as u16).collect(),
             ident_rounds: (0..H as u16).map(|h| (h, h)).collect(),
-            combos: cb, hmap: hm, w, norm: 1.0, pot: cfg.streets[0].pot,
+            combos: cb, hmap: hm, w, norm: 1.0, pot: cfg.streets[0].pot, dead0: cfg.board.iter().fold(0u64, |d, &c| d | 1 << c), left0: cfg.streets.len() - 1,
             regret: Arr::new(data_len, n_nodes, cfg.compress), sum: Arr::new(data_len, n_nodes, cfg.compress),
             params: Params::dcfr(), iters: 0,
         };
@@ -919,12 +922,33 @@ impl StreetSolver {
         self.br(self.root as usize, p, &self.w[1 - p], false)
     }
 
+    /// Per-combo total opponent weight compatible with the combo, summed over all deals of the `left`
+    /// remaining chance cards (same weighting as `br` / `norm`), so `ev / opp_mass` is chips per unit deal.
+    fn opp_mass_rec(&self, opp: &[f32], dead: u64, left: usize) -> Vec<f32> {
+        if left == 0 {
+            let mut cs = [0.0f32; 52];
+            let mut tot = 0.0;
+            for (&(a, b), &o) in self.combos.iter().zip(opp) { cs[a as usize] += o; cs[b as usize] += o; tot += o; }
+            return self.combos.iter().zip(opp).map(|(&(a, b), &o)| tot - cs[a as usize] - cs[b as usize] + o).collect();
+        }
+        let mut out = vec![0.0f32; H];
+        for c in (0..52u8).filter(|&c| dead >> c & 1 == 0) {
+            let sub = self.opp_mass_rec(&self.mask(opp, c), dead | 1 << c, left - 1);
+            for h in 0..H {
+                let (a, b) = self.combos[h];
+                if a != c && b != c { out[h] += sub[h]; }
+            }
+        }
+        out
+    }
+
     /// Average-strategy view of the node reached by `path`: an action index at Action nodes,
     /// a (canonical) card at Chance nodes. `ev` is the acting player's per-combo value in raw
     /// chips under the average strategy, weighted by the opponent's reach (not renormalized).
     pub fn query(&self, path: &[u32]) -> Result<NodeView, String> {
         let mut id = self.root as usize;
         let mut reach = self.w.clone();
+        let (mut dead, mut left) = (self.dead0, self.left0);
         for &x in path {
             let nd = &self.nodes[id];
             match nd.kind {
@@ -949,6 +973,7 @@ impl StreetSolver {
                     for r in reach.iter_mut() {
                         *r = self.mask(r, o.card);
                     }
+                    dead |= 1 << o.card; left -= 1;
                     id = o.child as usize;
                 }
                 _ => return Err("path goes past a terminal node".into()),
@@ -965,10 +990,7 @@ impl StreetSolver {
                 let kids = &self.children[nd.child_off as usize..nd.child_off as usize + n];
                 let action_ev: Vec<f32> = kids.iter().flat_map(|&k| self.br(k as usize, q, &reach[1 - q], false)).collect();
                 let opp = &reach[1 - q];
-                let mut cs = [0.0f32; 52];
-                let mut tot = 0.0;
-                for (&(a, b), &o) in self.combos.iter().zip(opp) { cs[a as usize] += o; cs[b as usize] += o; tot += o; }
-                let opp_mass: Vec<f32> = self.combos.iter().zip(opp).map(|(&(a, b), &o)| tot - cs[a as usize] - cs[b as usize] + o).collect();
+                let opp_mass = self.opp_mass_rec(opp, dead, left);
                 NodeView { kind: "action".to_string(), player: nd.player, n, cards: vec![], strategy: self.expand(nd, normalize(&s, n, w)),
                     ev: self.br(id, q, &reach[1 - q], false), range: reach[q].clone(), action_ev, opp_mass }
             }

@@ -75,6 +75,27 @@ const PORT = process.env.E2E_PORT || '4599', base = `http://localhost:${PORT}`;
       assert(nonRoot > 0, 'no non-root node reached');
       for (const p of posts) assert(/^river:(root|after-check|facing-bet|facing-raise):/.test(p.spotId), p.spotId);
       await page.screenshot({ path: `${out}/drill-${lang}.png` });
+      // turn drills: 4-card board, turn spot ids, cancel button during solve
+      await page.click('#next'); // river 'next' starts another river drill; cancel it, then switch street
+      await page.waitForSelector('#cancel'); await page.click('#cancel'); await page.waitForSelector('#street');
+      assert.strictEqual(posts.length, n);
+      await page.selectOption('#street', 'turn');
+      for (let k = 0; k < 2; k++) {
+        const ts = Date.now();
+        await page.click(k === 0 ? '#start' : '#next');
+        if (k === 0) { await page.waitForSelector('#cancel'); }
+        await page.waitForSelector('#acts button[data-a]', { timeout: 180000 });
+        console.log(lang, 'turn solve+deal ms', Date.now() - ts, 'solve ms', await page.getAttribute('#history', 'data-solve-ms'));
+        assert.strictEqual(await page.locator('#board-cards .card').count(), 4);
+        assert.strictEqual(await page.getAttribute('#history', 'data-street'), 'turn');
+        const nAct = await page.locator('#acts button[data-a]').count();
+        await page.click(`#acts button[data-a="${k % nAct}"]`);
+        await page.waitForSelector('#result');
+        if (k === 1) await page.screenshot({ path: `${out}/drill-turn-${lang}.png` });
+        await page.waitForFunction(() => !document.getElementById('save-err').textContent);
+      }
+      assert.strictEqual(posts.length, n + 2);
+      for (const p of posts.slice(n)) assert(/^turn:(root|after-check|facing-bet|facing-raise):[A-Za-z0-9]{8}:/.test(p.spotId), p.spotId);
       seen.drill[lang] = (await page.innerText('#screen')).split('\n').slice(0, 14).join('|');
       // progress matches posted values
       const check = async () => {
@@ -92,11 +113,12 @@ const PORT = process.env.E2E_PORT || '4599', base = `http://localhost:${PORT}`;
         const types = {}; for (const p of posts) { const t = p.spotId.split(':').slice(0, 2).join(':'); types[t] = (types[t] ?? 0) + 1; }
         assert.strictEqual(await page.locator('#by-spot tr').count(), Object.keys(types).length);
         assert(Object.keys(types).some((t) => t !== 'river:root'), 'breakdown has no non-root type');
+        assert(Object.keys(types).some((t) => t.startsWith('turn:')), 'progress has no turn row');
         for (const [t, c] of Object.entries(types)) {
           const row = page.locator(`#by-spot tr[data-type="${t}"]`);
           assert.strictEqual(await row.count(), 1, t);
-          assert((await row.innerText()).startsWith('River'), 'localized label ' + t);
-          assert(!(await row.innerText()).startsWith('river:'), 'raw key shown ' + t);
+          assert((await row.innerText()).startsWith(t.startsWith('turn') ? 'Turn' : 'River'), 'localized label ' + t);
+          assert(!/^(river|turn):/.test(await row.innerText()), 'raw key shown ' + t);
           assert.strictEqual(+(await row.locator('td').nth(1).innerText()).match(/\d+/)[0], c, t);
         }
         return exp;

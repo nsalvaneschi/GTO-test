@@ -1,7 +1,7 @@
 import { t, fmt, locales, type Lang, type Key } from './i18n';
 import { parseRange, presets, R } from './ranges';
 import { api, ApiError, type Progress } from './api';
-import { combos, comboName, cardName, randomBoard, freqsFor, evLossPct, isCorrect, spotId, samplePath, nodeType, isFacing, type Step, type NodeType, SUITS, RANKS } from './drill';
+import { combos, comboName, cardName, randomBoard, freqsFor, evLossPct, isCorrect, spotId, samplePath, type Street, nodeType, isFacing, type Step, type NodeType, SUITS, RANKS } from './drill';
 
 // Bet sizes sent to the engine; labels derive from these (NodeView has no size info, so this assumes none are merged/dropped, e.g. at all-in).
 const sizes = [0.5, 1];
@@ -16,7 +16,7 @@ let user: string | null = null;
 let authErr = '';
 let progress: Progress | 'loading' | null = null;
 const drill = { phase: 'idle' as 'idle' | 'solving' | 'ask' | 'reveal', board: '', oop: '', ip: '', view: null as View | null, h: 0,
-  path: [] as number[], steps: [] as Step[], freqs: [] as number[], chosen: -1, evLoss: 0, t0: 0, correct: 0, total: 0, saveErr: '' };
+  path: [] as number[], steps: [] as Step[], freqs: [] as number[], chosen: -1, evLoss: 0, street: 'river' as Street, solveT0: 0, solveMs: 0, t0: 0, correct: 0, total: 0, saveErr: '' };
 
 let lang: Lang = (new URLSearchParams(location.search).get('lang') as Lang) in locales
   ? (new URLSearchParams(location.search).get('lang') as Lang) : 'en';
@@ -32,9 +32,9 @@ const form = { board: 'As Kd 7c 4h 2s', pot: 10, stack: 50, oop: 'mixed', ip: 'm
 const worker = new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' });
 worker.onmessage = (e) => {
   const m = e.data;
-  if (m.type === 'progress') { expl = m.expl; iters = m.iters; if (owner === 'solver') { if (!view) query([]); renderStatus(); } }
+  if (m.type === 'progress') { expl = m.expl; iters = m.iters; if (owner === 'drill') renderDrillStatus(); if (owner === 'solver') { if (!view) query([]); renderStatus(); } }
   else if (m.type === 'done') {
-    if (owner === 'drill') { dealNode(); return; }
+    if (owner === 'drill') { drill.solveMs = Date.now() - drill.solveT0; console.log('drill solve ms', drill.solveMs, drill.street, 'expl', m.expl, 'iters', m.iters); dealNode(); return; }
     solving = false; expl = m.expl; iters = m.iters; query(path); render();
   }
   else if (m.type === 'node') {
@@ -151,19 +151,28 @@ const parseBoard = (b: string) => b.split(' ').map((x) => (RANKS.indexOf(x[0]) *
 function startDrill() {
   const ids = Object.keys(presets);
   const pick = () => ids[Math.floor(Math.random() * ids.length)];
-  Object.assign(drill, { phase: 'solving', board: randomBoard(), oop: pick(), ip: pick(), view: null, saveErr: '' });
-  owner = 'drill'; solving = false; err = '';
+  const turn = drill.street === 'turn';
+  Object.assign(drill, { phase: 'solving', board: randomBoard(Math.random, undefined, turn ? 4 : 5), oop: pick(), ip: pick(), view: null, saveErr: '', solveT0: Date.now() });
+  owner = 'drill'; solving = false; err = ''; expl = null; iters = 0;
+  // Turn: small menu (turn 50%/100% with no re-raise, river 50%) so the solve stays a few seconds; river drills unchanged.
+  const streets = turn ? [{ pot: DRILL.pot, stack: DRILL.stack, sizes, raise_cap: 1 }, { pot: DRILL.pot, stack: DRILL.stack, sizes: [0.5], raise_cap: 1 }]
+    : [{ pot: DRILL.pot, stack: DRILL.stack, sizes, raise_cap: 2 }];
   worker.postMessage({ type: 'solve', config: JSON.stringify({
     board: drill.board,
     ranges: [parseRange(presets[drill.oop]), parseRange(presets[drill.ip])],
-    streets: [{ pot: DRILL.pot, stack: DRILL.stack, sizes, raise_cap: 2 }],
+    streets,
     budget_mb: 1024,
-  }), chunk: 20, target: 0.3, maxIters: 2000 });
+  }), chunk: turn ? 10 : 20, target: 0.3, maxIters: turn ? 300 : 2000 });
   render();
 }
 
+function renderDrillStatus() {
+  const el = document.getElementById('drill-status');
+  if (el && expl !== null) el.innerHTML = `<b>${tr('exploitability')}:</b> <span id="drill-expl" data-value="${expl}">${fmt(expl / 100, lang, { style: 'percent', minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${tr('pot')}</span> · ${tr('iterations', { count: iters })}`;
+}
+
 async function dealNode() {
-  const s = await samplePath(queryAsync, parseBoard(drill.board));
+  const s = await samplePath(queryAsync, parseBoard(drill.board)); // stops at chance nodes: turn drills never leave the turn street
   Object.assign(drill, { view: s.view, h: s.h, path: s.path, steps: s.steps, phase: 'ask', t0: Date.now() });
   if (screen === 'drill') render();
 }
@@ -182,7 +191,7 @@ function answer(i: number) {
   drill.total++; if (isCorrect(drill.freqs, i)) drill.correct++;
   drill.phase = 'reveal'; drill.saveErr = '';
   render();
-  api.postResult({ spotId: spotId(drill.board, drill.oop, drill.ip, nodeType(drill.steps), drill.path), hero: v.player, handCombo: comboName(drill.h), action: i,
+  api.postResult({ spotId: spotId(drill.board, drill.oop, drill.ip, nodeType(drill.steps), drill.path, drill.street), hero: v.player, handCombo: comboName(drill.h), action: i,
     solverFreqs: drill.freqs, evLoss: drill.evLoss, ms, lang }).catch((e) => {
     if (e instanceof ApiError && e.status === 401) { handleApiErr(e); return; }
     drill.saveErr = errText(codeOf(e)); const el = document.getElementById('save-err'); if (el) el.textContent = drill.saveErr;
@@ -194,15 +203,26 @@ function renderDrill() {
   const el = $('screen');
   const sessionLine = () => drill.total
     ? `<div id="session" data-correct="${drill.correct}" data-total="${drill.total}">${tr('drill.session', { correct: drill.correct, total: drill.total, pct: fmt(drill.correct / drill.total, lang, { style: 'percent' }) })}</div>` : '';
-  if (drill.phase === 'idle') { el.innerHTML = `<button id="start" class="a">${tr('drill.start')}</button>${sessionLine()}<div class="err">${err ? tr('error', { message: err }) : ''}</div>`; $('start').onclick = startDrill; return; }
-  if (drill.phase === 'solving') { el.innerHTML = `<p id="drill-solving">${tr('drill.solving')}</p>${sessionLine()}`; return; }
+  if (drill.phase === 'idle') {
+    el.innerHTML = `<label>${tr('drill.street')}<select id="street">${(['river', 'turn'] as const).map((s) => `<option value="${s}" ${s === drill.street ? 'selected' : ''}>${tr(('street.' + s) as Key)}</option>`).join('')}</select></label>
+      <button id="start" class="a">${tr('drill.start')}</button>${sessionLine()}<div class="err">${err ? tr('error', { message: err }) : ''}</div>`;
+    $('start').onclick = startDrill;
+    $<HTMLSelectElement>('street').onchange = (e) => { drill.street = (e.target as HTMLSelectElement).value as Street; };
+    return;
+  }
+  if (drill.phase === 'solving') {
+    el.innerHTML = `<p id="drill-solving">${tr('drill.solving')}</p><div id="drill-status"></div><button id="cancel" class="a">${tr('drill.cancel')}</button>${sessionLine()}`;
+    $('cancel').onclick = () => { worker.postMessage({ type: 'cancel' }); drill.phase = 'idle'; render(); };
+    renderDrillStatus();
+    return;
+  }
   const v = drill.view!;
   const [c1, c2] = combos[drill.h];
   const as = actions(v, isFacing(drill.steps));
   const nt = nodeType(drill.steps);
   const head = `<div>${tr('board')}: <span id="board-cards">${parseBoard(drill.board).map(cardHtml).join('')}</span></div>
     <div style="margin:6px 0">${tr('toAct', { player: tr(('player.' + v.player) as Key) })} · ${tr('pot')}: ${fmt(DRILL.pot, lang)} · ${tr('stack')}: ${fmt(DRILL.stack, lang)} · ${tr('oop')}: ${tr(('preset.' + drill.oop) as Key)} · ${tr('ip')}: ${tr(('preset.' + drill.ip) as Key)}</div>
-    <div id="history" data-node="${nt}" data-depth="${drill.steps.length}" style="margin:6px 0">${tr(('progress.spot.river:' + nt) as Key)} · ${tr('drill.history')}: ${drill.steps.length ? drill.steps.map(stepLabel).join(' → ') : tr('drill.noHistory')}</div>
+    <div id="history" data-street="${drill.street}" data-solve-ms="${drill.solveMs}" data-node="${nt}" data-depth="${drill.steps.length}" style="margin:6px 0">${tr(('progress.spot.' + drill.street + ':' + nt) as Key)} · ${tr('drill.history')}: ${drill.steps.length ? drill.steps.map(stepLabel).join(' → ') : tr('drill.noHistory')}</div>
     <div style="margin:6px 0">${tr('drill.yourHand')}: <span id="hand" data-combo="${comboName(drill.h)}">${[c2, c1].sort((a, b) => (b >> 2) - (a >> 2)).map(cardHtml).join('')}</span></div>`;
   if (drill.phase === 'ask') {
     el.innerHTML = `${head}<div>${tr('drill.choose')}</div><div id="acts">${as.map((a, i) => `<button class="a" data-a="${i}" style="border-left:6px solid ${a.color}">${tr(a.key, a.vars)}</button>`).join('')}</div>${sessionLine()}`;
