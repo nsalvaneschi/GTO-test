@@ -163,8 +163,8 @@ enum Nd {
     Act { player: usize, kids: Vec<usize>, labels: Vec<String> },
     Fold { u0: f64 },
     /// u0 for (SB class i, BB class j), row-major.
-    #[allow(dead_code)] // pot-type tag, read by the realisation fit (P2)
-    Show { u: Vec<f64>, pot: u8 },
+    /// `pot` = pot-type tag, `inv` = chips each player has in; `allin` terminals use raw equity.
+    Show { u: Vec<f64>, pot: u8, inv: f64, allin: bool },
 }
 
 struct Tree {
@@ -192,7 +192,7 @@ impl B<'_> {
             };
             share * pot - inv
         }).collect();
-        self.nodes.push(Nd::Show { u, pot: pt as u8 });
+        self.nodes.push(Nd::Show { u, pot: pt as u8, inv, allin });
         self.nodes.len() - 1
     }
 
@@ -231,6 +231,19 @@ impl B<'_> {
         self.nodes.push(Nd::Act { player: me, kids, labels });
         self.nodes.len() - 1
     }
+}
+
+/// Aggregated non-all-in showdown spot of one pot type. Players: 0 = SB (IP), 1 = BB (OOP).
+pub struct PotSpot {
+    pub pot_type: usize,
+    /// Chips each player has in (pot = 2 * inv), mass-weighted mean over the aggregated terminals.
+    pub inv: f64,
+    /// Probability that a deal reaches these terminals.
+    pub mass: f64,
+    /// Per-class range weight (conditional on being dealt, mass-weighted mean over terminals), in [0, 1].
+    pub range: [Vec<f64>; 2],
+    /// Per-class probability of reaching the terminals given the class is dealt.
+    pub reach: [Vec<f64>; 2],
 }
 
 pub struct PreflopSolver<'a> {
@@ -444,6 +457,60 @@ impl<'a> PreflopSolver<'a> {
         match &self.tree.nodes[id] {
             Nd::Act { player, kids, labels } => Some((*player, labels.clone(), norm(&self.out()[id], kids.len()))),
             _ => None,
+        }
+    }
+
+    /// Range extraction for the realisation fit: per pot type, the non-all-in showdown terminals
+    /// aggregated under the returned strategy. `None` if the pot type is never reached.
+    pub fn pot_spots(&self) -> Vec<Option<PotSpot>> {
+        let mut nodes: Vec<(u8, f64, [Vec<f64>; 2])> = vec![];
+        let ones = vec![1.0; NC];
+        self.collect_show(self.tree.root, [ones.clone(), ones], &mut nodes);
+        (0..POT_TYPES).map(|pt| {
+            let ns: Vec<_> = nodes.iter().filter(|n| n.0 as usize == pt).collect();
+            let (mut mass, mut inv) = (0.0, 0.0);
+            let (mut range, mut reach) = ([vec![0.0; NC], vec![0.0; NC]], [vec![0.0; NC], vec![0.0; NC]]);
+            let node_mass: Vec<f64> = ns.iter().map(|n| (0..NC * NC).map(|k| self.eq.w[k] * n.2[0][k / NC] * n.2[1][k % NC]).sum()).collect();
+            let tot: f64 = node_mass.iter().sum();
+            if tot <= 0.0 {
+                return None;
+            }
+            for (n, &m) in ns.iter().zip(&node_mass) {
+                mass += m;
+                inv += m * n.1;
+                for p in 0..2 {
+                    let o = 1 - p;
+                    for i in 0..NC {
+                        // P(class i reaches this node | class i dealt) = r_i * sum_j w_ij r_o[j] / sum_j w_ij
+                        let (mut a, mut b) = (0.0, 0.0);
+                        for j in 0..NC {
+                            let w = if p == 0 { self.eq.w[i * NC + j] } else { self.eq.w[j * NC + i] };
+                            a += w * n.2[o][j];
+                            b += w;
+                        }
+                        range[p][i] += m / tot * n.2[p][i];
+                        reach[p][i] += if b > 0.0 { n.2[p][i] * a / b } else { 0.0 };
+                    }
+                }
+            }
+            Some(PotSpot { pot_type: pt, inv: inv / mass, mass, range, reach })
+        }).collect()
+    }
+
+    fn collect_show(&self, id: usize, r: [Vec<f64>; 2], out: &mut Vec<(u8, f64, [Vec<f64>; 2])>) {
+        match &self.tree.nodes[id] {
+            Nd::Show { pot, inv, allin: false, .. } => out.push((*pot, *inv, r)),
+            Nd::Act { player, kids, .. } => {
+                let st = norm(&self.out()[id], kids.len());
+                for (a, &k) in kids.iter().enumerate() {
+                    let mut r2 = r.clone();
+                    for i in 0..NC {
+                        r2[*player][i] *= st[a * NC + i];
+                    }
+                    self.collect_show(k, r2, out);
+                }
+            }
+            _ => {}
         }
     }
 

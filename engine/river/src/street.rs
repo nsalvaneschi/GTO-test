@@ -683,6 +683,12 @@ impl StreetSolver {
         (100.0 * tot / 2.0 / self.norm as f64 / self.pot as f64) as f32
     }
 
+    /// Root value of player `p` (0 = OOP, 1 = IP) per combo under the average strategy, in raw chips
+    /// weighted by the opponent's range (same convention as `NodeView.ev`, but for either player).
+    pub fn root_ev(&self, p: usize) -> Vec<f32> {
+        self.br(self.root as usize, p, &self.w[1 - p], false)
+    }
+
     /// Average-strategy view of the node reached by `path`: an action index at Action nodes,
     /// a (canonical) card at Chance nodes. `ev` is the acting player's per-combo value in raw
     /// chips under the average strategy, weighted by the opponent's reach (not renormalized).
