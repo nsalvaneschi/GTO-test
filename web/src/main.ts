@@ -2,8 +2,9 @@ import './styles.css';
 import { cardTile, esc, icon } from './ui';
 import { t, fmt, locales, type Lang, type Key } from './i18n';
 import { parseRange, presets, R } from './ranges';
-import { api, ApiError, type HhProgress, type Progress } from './api';
+import { api, ApiError, setUnauthorizedHandler, type HhProgress, type Progress } from './api';
 import { renderHh } from './hh/screen';
+import { hhSub, setHhRoute } from './hh/pages';
 import { engineErrKey, normalizeBoard, validChips } from './validate';
 import { H, combos, comboName, stepOf, cardName, randomBoard, freqsFor, evLossPct, isCorrect, verdictOf, spotId, samplePath, type Street, nodeType, isFacing, type Step, type NodeType, SUITS, RANKS } from './drill';
 
@@ -19,6 +20,7 @@ let screen: Screen = 'solver';
 let owner: 'solver' | 'drill' = 'solver';
 let user: string | null = null;
 let authErr = '';
+let returnTo: Screen | null = null; // screen to come back to after a re-login (expired session)
 let progress: Progress | 'loading' | null = null;
 let progTab: 'drills' | 'hh' = 'drills';
 let hhProg: HhProgress | 'loading' | null = null;
@@ -106,17 +108,38 @@ function render() {
   if (screen === 'solver') renderSolver();
   else if (screen === 'drill') renderDrill();
   else if (screen === 'progress') renderProgress();
-  else if (screen === 'hh') renderHh($('screen'), { tr, lang, user, errText, codeOf });
+  else if (screen === 'hh') renderHh($('screen'), { tr, lang, user, errText, codeOf, nav: pushHash });
   else renderAuth();
 }
 
-function go(s: Screen) {
+// Hash routes (History API, no server config): #/solver #/practice #/progress #/hands[/list|/<id>]. Auth is not a route.
+const ROUTE: Record<string, Screen> = { solver: 'solver', practice: 'drill', progress: 'progress', hands: 'hh' };
+const hashOf = (s: Screen) => '#/' + (s === 'hh' ? 'hands' + (hhSub() ? '/' + hhSub() : '') : Object.keys(ROUTE).find((k) => ROUTE[k] === s));
+function pushHash(mode: 'push' | 'replace' = 'push') {
+  if (screen === 'auth') return;
+  const h = hashOf(screen);
+  if (location.hash !== h) history[mode === 'push' ? 'pushState' : 'replaceState'](null, '', h);
+}
+function applyHash() {
+  const m = /^#\/(solver|practice|progress|hands)(?:\/(.*))?$/.exec(location.hash);
+  if (m && m[1] === 'hands') setHhRoute(m[2] ?? '');
+  go(m ? ROUTE[m[1]] : 'solver', 'none');
+}
+window.addEventListener('popstate', applyHash);
+
+function go(s: Screen, mode: 'push' | 'replace' | 'none' = 'push') {
   readForm();
-  if (s !== 'drill' && drill.phase === 'solving') { worker.postMessage({ type: 'cancel' }); drill.phase = 'idle'; } // leaving mid-solve: stop the work
-  screen = s; authErr = ''; if (s === 'progress') progTab = 'drills';
+  if (s !== 'drill' && drill.phase === 'solving') { worker.postMessage({ type: 'cancel' }); drill.phase = 'idle'; } // leaving mid-solve (nav or browser Back): stop the work
+  screen = s; if (mode !== 'none') pushHash(mode); authErr = ''; if (s === 'progress') progTab = 'drills';
   if (s === 'progress' && user) { progress = 'loading'; api.progress().then((p) => { progress = p; if (screen === 'progress') render(); }, (e) => { progress = null; handleApiErr(e); }); }
   render();
 }
+
+// Any API call answering 401 'unauthorized' lands here: show the logged-out state but keep parsed/analysed hand data.
+setUnauthorizedHandler(() => {
+  if (!user) return;
+  readForm(); user = null; progress = null; hhProg = null; returnTo = screen === 'auth' ? returnTo : screen; screen = 'auth'; authErr = 'unauthorized'; render();
+});
 
 function errText(code: string): string {
   const k = ('err.' + code) as Key;
@@ -141,7 +164,7 @@ function renderAuth() {
     $<HTMLButtonElement>('do-login').disabled = $<HTMLButtonElement>('do-register').disabled = true; b.classList.add('loading');
     try {
       user = (await fn($<HTMLInputElement>('u').value, $<HTMLInputElement>('pw').value)).username;
-      progress = null; screen = 'drill'; authErr = ''; render();
+      progress = null; authErr = ''; const to = returnTo ?? 'drill'; returnTo = null; go(to, 'replace');
     } catch (e) {
       authErr = codeOf(e); const el = $('auth-err'); el.dataset.code = authErr; el.textContent = errText(authErr);
       $<HTMLButtonElement>('do-login').disabled = $<HTMLButtonElement>('do-register').disabled = false; b.classList.remove('loading');
@@ -385,7 +408,7 @@ function solve() {
   readForm();
   const b = normalizeBoard(form.board);
   const bad = !b.ok ? 'solver.err.' + b.err : !validChips(form.pot) || !validChips(form.stack) ? 'solver.err.chips' : '';
-  if (bad) { err = bad; render(); return; }
+  if (bad) { err = bad; view = null; path = []; facing = [false]; seq = []; sel = -1; expl = null; iters = 0; render(); return; } // hide the previous result: only the error is shown
   form.board = b.ok ? b.board : form.board;
   err = ''; view = null; path = []; facing = [false]; seq = []; sel = -1; expl = null; iters = 0; solving = true; owner = 'solver'; drill.phase = 'idle';
   const config = JSON.stringify({
@@ -533,6 +556,7 @@ function gridHtml(v: View, as: ReturnType<typeof actions>, mark = -1): string {
 
 applyTheme();
 document.documentElement.lang = lang;
+{ const m = /^#\/(solver|practice|progress|hands)(?:\/(.*))?$/.exec(location.hash); if (m) { screen = ROUTE[m[1]]; if (m[1] === 'hands') setHhRoute(m[2] ?? ''); } }
 render();
 // Restore the session after a reload (httpOnly cookie): only touch the UI if nothing else has happened meanwhile.
 api.me().then((m) => { if (!user && screen !== 'auth') { readForm(); user = m.username; render(); } }, () => { /* not logged in or offline: stay logged out */ });

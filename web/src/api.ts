@@ -30,12 +30,17 @@ export function hhQuery(f: HhFilters, limit: number, offset: number): string {
 
 export class ApiError extends Error { constructor(public status: number, public code: string) { super(code); } }
 
+/** One central place for expired sessions: any API call answering 401 'unauthorized' notifies this handler (login failures are 'invalid_credentials' and are not affected). */
+let onUnauthorized: () => void = () => {};
+export const setUnauthorizedHandler = (f: () => void) => { onUnauthorized = f; };
+
 async function call<T>(method: string, url: string, body?: unknown): Promise<T> {
   let r: Response;
   try {
     r = await fetch(url, { method, credentials: 'same-origin', headers: body ? { 'content-type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined });
   } catch { throw new ApiError(0, 'network'); }
   const j = await r.json().catch(() => ({}));
+  if (r.status === 401 && j.error === 'unauthorized') onUnauthorized();
   if (!r.ok) throw new ApiError(r.status, j.error ?? 'generic');
   return j as T;
 }

@@ -12,29 +12,43 @@ type Tab = 'import' | 'hands';
 const P = {
   tab: 'import' as Tab, filters: { site: '', from: '', to: '', status: '', street: '', minEvLoss: '' } as HhFilters, offset: 0,
   list: null as { total: number; hands: HhHandRow[] } | null, loading: false, err: '',
-  replay: null as { hand: HhHandFull; step: number } | null, confirm: '' as '' | 'hands' | 'all', msg: '', opener: '',
+  replay: null as { hand: HhHandFull; step: number } | null, want: null as number | null, confirm: '' as '' | 'hands' | 'all', msg: '', opener: '',
 };
 const PAGE = 20;
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!));
 const cardSpan = (c: string) => cardTile(c, 'sm');
 
 export const currentTab = () => P.tab;
+/** Route suffix after #/hands: '' = import tab, 'list' = my hands, '<id>' = replay of that stored hand. */
+export const hhSub = () => (P.replay ? String(P.replay.hand.id) : P.want !== null ? String(P.want) : P.tab === 'hands' ? 'list' : '');
+export function setHhRoute(sub: string) {
+  const id = /^\d+$/.test(sub) ? +sub : null;
+  P.tab = sub === '' ? 'import' : 'hands';
+  if (id === null) { P.want = null; if (P.replay) P.replay = null; if (sub === 'list') P.list = null; return; }
+  if (P.replay?.hand.id !== id) { P.replay = null; P.want = id; }
+}
 export function tabsHtml(c: Ctx) {
   return `<nav id="hh-tabs" class="tabs">${(['import', 'hands'] as const).map((t) => `<button data-hhtab="${t}" class="${P.tab === t ? 'on' : ''}" aria-pressed="${P.tab === t}">${c.tr(('hh.tab.' + t) as Key)}</button>`).join('')}</nav>`;
 }
-export function bindTabs(el: HTMLElement, rerender: () => void) {
-  el.querySelectorAll<HTMLButtonElement>('[data-hhtab]').forEach((b) => { b.onclick = () => { P.tab = b.dataset.hhtab as Tab; if (P.tab === 'hands') { P.list = null; P.replay = null; } rerender(); }; });
+export function bindTabs(el: HTMLElement, rerender: () => void, c: Ctx) {
+  el.querySelectorAll<HTMLButtonElement>('[data-hhtab]').forEach((b) => { b.onclick = () => { P.tab = b.dataset.hhtab as Tab; P.want = null; if (P.tab === 'hands') { P.list = null; P.replay = null; } c.nav(); rerender(); }; });
 }
 /** Drop cached list data (after an upload) so the next visit reloads. */
 export const invalidate = () => { P.list = null; P.replay = null; };
 
 export function renderHands(el: HTMLElement, c: Ctx, toImport: () => void) {
+  if (!el.isConnected) return;
   const { tr, lang } = c;
   const rerender = () => renderHands(el, c, toImport);
   const head = `<h4>${tr('hh.title')}</h4><div id="hh-disclaimer" class="note">${tr('hh.disclaimer')}</div>${tabsHtml(c)}`;
-  const done = () => bindTabs(el, () => { if (P.tab === 'import') toImport(); else rerender(); });
+  const done = () => bindTabs(el, () => { if (P.tab === 'import') toImport(); else rerender(); }, c);
   if (!c.user) { el.innerHTML = `${head}<div class="empty">${icon.inbox}<p id="hh-list-login">${tr('hh.list.needLogin')}</p></div>`; done(); return; }
   if (P.replay) { renderReplay(el, c, head, done, rerender); return; }
+  if (P.want !== null && !P.loading) { // opened by URL (reload / Back): load that hand, then show it
+    P.loading = true;
+    api.hhGet(P.want).then((hand) => { P.replay = { hand, step: 0 }; P.err = ''; }, (e) => { P.err = c.errText(c.codeOf(e)); P.want = null; c.nav(); })
+      .then(() => { P.loading = false; rerender(); });
+  }
   if (!P.list && !P.loading) {
     P.loading = true;
     api.hhFiltered(P.filters, PAGE, P.offset).then((r) => { P.list = r; P.err = ''; }, (e) => { P.err = c.errText(c.codeOf(e)); P.list = { total: 0, hands: [] }; })
@@ -74,7 +88,7 @@ export function renderHands(el: HTMLElement, c: Ctx, toImport: () => void) {
   document.getElementById('hh-prev')!.onclick = () => { P.offset = Math.max(0, P.offset - PAGE); P.list = null; rerender(); };
   document.getElementById('hh-next')!.onclick = () => { P.offset += PAGE; P.list = null; rerender(); };
   el.querySelectorAll<HTMLButtonElement>('[data-open]').forEach((b) => { b.onclick = async () => {
-    try { P.replay = { hand: await api.hhGet(+b.dataset.open!), step: 0 }; P.err = ''; } catch (e) { P.err = c.errText(c.codeOf(e)); }
+    try { P.replay = { hand: await api.hhGet(+b.dataset.open!), step: 0 }; P.err = ''; c.nav(); } catch (e) { P.err = c.errText(c.codeOf(e)); }
     rerender();
   }; });
   document.getElementById('hh-del-hands')!.onclick = () => { P.confirm = 'hands'; P.opener = 'hh-del-hands'; P.msg = ''; rerender(); };
@@ -115,7 +129,8 @@ function renderReplay(el: HTMLElement, c: Ctx, head: string, done: () => void, r
   const shown = h.actions.slice(0, R.step);
   const lines = STREETS.filter((s) => shown.some((a) => a.street === s) || s === st.street).map((s) => `<li><b>${tr(('street.' + s) as Key)}</b><ul>${
     shown.map((a, i) => ({ a, i })).filter((x) => x.a.street === s).map(({ a, i }) => `<li data-i="${i}" data-seat="${a.seat}" data-kind="${a.kind}" ${a.seat === heroSeat ? 'style="font-weight:600"' : ''}>${who(a.seat)} ${actText(a)}</li>`).join('')}</ul></li>`).join('');
-  const stacks = Object.entries(st.stacks).map(([s, v]) => `<tr data-seat="${s}"${+s === heroSeat ? ' class="hero-row"' : ''}><td>${who(+s)}</td><td>${bb(v)}</td><td>${st.inStreet[+s] ? bb(st.inStreet[+s]) : '-'}</td></tr>`).join('');
+  const stackRows = Object.entries(st.stacks);
+  const stacks = stackRows.map(([s, v]) => `<tr data-seat="${s}"${+s === heroSeat ? ' class="hero-row"' : ''}${st.folded.includes(+s) ? ' data-folded="true"' : ''}><td>${who(+s)}${st.folded.includes(+s) ? ` <span class="muted small">(${tr('hh.replay.folded')})</span>` : ''}</td><td>${bb(v)}</td><td>${st.inStreet[+s] ? bb(st.inStreet[+s]) : '-'}</td></tr>`).join('');
   const lastIdx = R.step - 1;
   const dec = lastIdx >= 0 && h.actions[lastIdx].seat === heroSeat ? decisionAt(full.decisions, lastIdx) : null;
   let panel = '';
@@ -153,18 +168,34 @@ function renderReplay(el: HTMLElement, c: Ctx, head: string, done: () => void, r
     <div class="panel felt"><div class="board-row"><div><div class="panel-title">${tr('hh.replay.cards')}</div><span id="rp-cards" class="cards">${(h.hero_cards ?? []).map(cardSpan).join('') || '-'}</span></div>
       <div><div class="panel-title">${tr('street.' + st.street as Key)} · ${tr('hh.replay.board')}</div><span id="rp-board" class="cards" data-n="${st.board.length}">${st.board.map(cardSpan).join('') || '-'}</span></div>
       <div><div class="panel-title">${tr('hh.replay.pot')}</div><span class="big" id="rp-pot" data-value="${st.potStart}">${bb(st.potStart)}</span></div></div>
-    <div class="tbl-wrap" style="margin-top:var(--s-3)"><table id="rp-stacks"><tr><th></th><th>${tr('hh.replay.stacks')}</th><th>${tr('hh.replay.inStreet')}</th></tr>${stacks}</table></div></div>
-    <div class="panel"><div class="row" style="margin-bottom:var(--s-3)"><button id="rp-prev" ${R.step > 0 ? '' : 'disabled'}>${tr('hh.replay.prev')}</button><button id="rp-next" ${R.step < N ? '' : 'disabled'}>${tr('hh.replay.next')}</button><button id="rp-nextdec" class="primary">${tr('hh.replay.nextDecision')}</button>
+    ${stackRows.length >= 2 && heroSeat >= 0 ? `<div class="tbl-wrap" style="margin-top:var(--s-3)"><table id="rp-stacks"><tr><th></th><th>${tr('hh.replay.stacks')}</th><th>${tr('hh.replay.inStreet')}</th></tr>${stacks}</table></div>` : `<p id="rp-stacks-note" class="small muted">${tr('hh.replay.stacksMissing')}</p>`}</div>
+    <div class="panel"><div id="rp-ctl" class="row" role="group" tabindex="-1" aria-label="${tr('hh.replay.stepper')}" style="margin-bottom:var(--s-3)"><button id="rp-prev" ${R.step > 0 ? '' : 'disabled'}>${tr('hh.replay.prev')}</button><button id="rp-next" ${R.step < N ? '' : 'disabled'}>${tr('hh.replay.next')}</button><button id="rp-nextdec" class="primary">${tr('hh.replay.nextDecision')}</button>
       <span id="rp-step" class="pill" data-step="${R.step}" data-total="${N}">${R.step === 0 ? tr('hh.replay.start') : `${R.step}/${N}`}</span></div>
     <ul id="rp-actions" class="log">${lines}</ul></div></div>
     <aside class="side-panel">${panel}</aside></div>`;
-  el.querySelectorAll<HTMLButtonElement>('[data-goto]').forEach((b) => { b.onclick = () => { R.step = +b.dataset.goto!; rerender(); }; });
+  // Re-rendering replaces every node, so remember which control had focus and put it back (by id / data-goto).
+  const redraw = () => {
+    const a = document.activeElement as HTMLElement | null;
+    const sel = a && el.contains(a) ? (a.id ? `#${a.id}` : a.dataset.goto ? `[data-goto="${a.dataset.goto}"]` : '') : '';
+    rerender();
+    const n = sel ? el.querySelector<HTMLButtonElement>(sel) : null;
+    (n && !n.disabled ? n : sel ? el.querySelector<HTMLElement>('#rp-ctl') : null)?.focus(); // a control that became disabled hands focus to the stepper group
+  };
+  let live = document.getElementById('rp-live'); // persistent live region (outside the re-rendered area) so changes are announced
+  if (!live) { live = document.createElement('div'); live.id = 'rp-live'; live.className = 'sr-only'; live.setAttribute('aria-live', 'polite'); document.body.appendChild(live); }
+  live.textContent = tr('hh.replay.stepAnnounce', { step: R.step, total: N });
+  el.querySelectorAll<HTMLButtonElement>('[data-goto]').forEach((b) => { b.onclick = () => { R.step = +b.dataset.goto!; redraw(); }; });
+  document.getElementById('rp-ctl')!.onkeydown = (e) => {
+    const to = e.key === 'ArrowLeft' ? R.step - 1 : e.key === 'ArrowRight' ? R.step + 1 : e.key === 'Home' ? 0 : e.key === 'End' ? N : null;
+    if (to === null) return;
+    e.preventDefault(); R.step = Math.min(N, Math.max(0, to)); redraw();
+  };
   done();
-  document.getElementById('rp-back')!.onclick = () => { P.replay = null; rerender(); };
-  document.getElementById('rp-prev')!.onclick = () => { R.step = Math.max(0, R.step - 1); rerender(); };
-  document.getElementById('rp-next')!.onclick = () => { R.step = Math.min(N, R.step + 1); rerender(); };
+  document.getElementById('rp-back')!.onclick = () => { P.replay = null; c.nav(); rerender(); };
+  document.getElementById('rp-prev')!.onclick = () => { R.step = Math.max(0, R.step - 1); redraw(); };
+  document.getElementById('rp-next')!.onclick = () => { R.step = Math.min(N, R.step + 1); redraw(); };
   document.getElementById('rp-nextdec')!.onclick = () => {
     const i = h.actions.findIndex((a, k) => k >= R.step && a.seat === heroSeat);
-    R.step = i < 0 ? N : i + 1; rerender();
+    R.step = i < 0 ? N : i + 1; redraw();
   };
 }

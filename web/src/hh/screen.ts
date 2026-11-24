@@ -17,6 +17,7 @@ export interface Ctx {
   user: string | null;
   errText: (code: string) => string;
   codeOf: (e: unknown) => string;
+  nav: () => void; // push the current #/hands/... route after a tab / replay change
 }
 
 const MAX_TEXT = 2_000_000; // chars; larger pastes are refused instead of freezing the tab
@@ -31,6 +32,7 @@ const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&l
 const key = (site: string, id: string) => `${site}:${id}`;
 
 export function renderHh(el: HTMLElement, c: Ctx) {
+  if (!el.isConnected) return; // an async tail (upload, analysis) finishing after the screen was rebuilt (e.g. 401 -> login view) must not draw into a stale node
   if (currentTab() === 'hands') { renderHands(el, c, () => renderHh(el, c)); return; }
   const { tr, lang } = c;
   const pct = (x: number, d = 0) => fmt(x, lang, { style: 'percent', minimumFractionDigits: d, maximumFractionDigits: d });
@@ -90,7 +92,7 @@ export function renderHh(el: HTMLElement, c: Ctx) {
       <div id="hh-upload-hint" class="small muted">${c.user ? '' : tr('hh.uploadHint')}</div>
       <div id="hh-upload-msg" class="ok" data-saved="${S.upMsg ? 1 : 0}">${esc(S.upMsg)}</div><div id="hh-upload-err" class="err">${esc(S.upErr)}</div></div>`;
 
-  bindTabs(el, () => renderHh(el, c));
+  bindTabs(el, () => renderHh(el, c), c);
   const val = (id: string) => (document.getElementById(id) as HTMLInputElement).value;
   const readInputs = () => { S.text = val('hh-text'); S.width = val('hh-width'); S.heroRange = val('hh-hero-range'); S.villRange = val('hh-vill-range'); };
   ['hh-text', 'hh-width', 'hh-hero-range', 'hh-vill-range'].forEach((id) => { document.getElementById(id)!.oninput = readInputs; });
@@ -127,7 +129,7 @@ export function renderHh(el: HTMLElement, c: Ctx) {
     try {
       const hands = S.parsed!.results.flatMap((r) => (r.ok ? [r.hand] : []));
       S.upMsg = tr('hh.uploaded', await uploadAll(c.user, hands, S.results)); invalidate();
-    } catch (e) { S.upErr = c.errText(c.codeOf(e)); }
+    } catch (e) { S.upErr = c.codeOf(e) === 'unauthorized' ? '' : c.errText(c.codeOf(e)); } // expired session: the login view says so, keep this view clean for the retry
     S.uploading = false;
     renderHh(el, c);
   };

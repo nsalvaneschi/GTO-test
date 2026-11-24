@@ -10,7 +10,7 @@ const BOARD_LEN: Record<string, number> = { preflop: 0, flop: 3, turn: 4, river:
 export interface ReplayState {
   street: string; board: string[]; potStart: number; folded: number[];
   inStreet: Record<number, number>; // chips each seat has put in during the current street
-  stacks: Record<number, number>; // stack behind at this step for seats still in the hand
+  stacks: Record<number, number>; // stack behind at this step for every seat (folded seats keep what they had left)
 }
 
 /** State after the first `step` actions (0 = start of hand). */
@@ -29,7 +29,7 @@ export function replayAt(h: StoredHand, step: number): ReplayState {
     if (to !== null) cur[a.seat] = Math.max(cur[a.seat] ?? 0, to);
   }
   const stacks: Record<number, number> = {};
-  for (const s of h.seats) if (!folded.has(s.seat)) stacks[s.seat] = Math.max(0, s.stack - (committed[s.seat] ?? 0) - (cur[s.seat] ?? 0));
+  for (const s of h.seats) stacks[s.seat] = Math.max(0, s.stack - (committed[s.seat] ?? 0) - (cur[s.seat] ?? 0));
   return { street, board: h.board.slice(0, BOARD_LEN[street] ?? 0), potStart: h.pot_by_street[si] ?? 0, folded: [...folded], inStreet: cur, stacks };
 }
 
