@@ -11,3 +11,4 @@ Queue:
 
 Status entries below, newest last.
 - 2026-11-24: handhistory design written by architect (docs/handhistory-design.md). H1..H4 queued; H1 parser starts in parallel with river-drill builder (disjoint dirs).
+- 2026-11-24: river drills on all decision nodes committed (server 10/10, vitest 7/7, wasm, browser, e2e all pass). Starting H2 (server) and turn drills in parallel; H1 parser still running.
