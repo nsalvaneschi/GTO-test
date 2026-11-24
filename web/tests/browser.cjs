@@ -3,8 +3,16 @@ const { spawn } = require('child_process');
 const fs = require('fs');
 const assert = require('assert');
 (async () => {
-  const srv = spawn('npx', ['vite', 'preview', '--port', '4173', '--strictPort'], { cwd: __dirname + '/..' });
-  await new Promise((r) => srv.stdout.on('data', (d) => /4173/.test(String(d)) && r()));
+  const srv = spawn('npx', ['vite', 'preview', '--port', '4173', '--strictPort'], { cwd: __dirname + '/..', detached: true });
+  let srvErr = '';
+  srv.stderr.on('data', (d) => { srvErr += String(d); });
+  // Fail loudly (never exit 0 silently) if the preview server cannot start, e.g. a stale one holds the port.
+  await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('preview server did not start in 30s: ' + srvErr)), 30000);
+    srv.on('exit', (code) => { clearTimeout(timer); reject(new Error('preview server exited (' + code + '): ' + srvErr)); });
+    srv.stdout.on('data', (d) => { if (/4173/.test(String(d))) { clearTimeout(timer); resolve(); } });
+  });
+  srv.removeAllListeners('exit');
   const out = __dirname + '/../test-artifacts'; fs.mkdirSync(out, { recursive: true });
   const browser = await chromium.launch();
   const labels = {}; const actions = {};
@@ -40,5 +48,5 @@ const assert = require('assert');
     assert.strictEqual(new Set(Object.values(labels)).size, 3, JSON.stringify(labels));
     assert.strictEqual(new Set(Object.values(actions)).size, 3, JSON.stringify(actions));
     console.log('OK', labels);
-  } finally { await browser.close(); srv.kill(); spawn('pkill',['-f','vite preview']); }
+  } finally { await browser.close(); try { process.kill(-srv.pid); } catch (e) { try { srv.kill(); } catch (e2) {} } }
 })().then(() => process.exit(0)).catch((e) => { console.error(e); process.exit(1); });
