@@ -5,6 +5,11 @@ Node 22, no dependencies (`node:http`, `node:sqlite`, `node:crypto`). Serves `we
 Run: `node server/src/index.js` (env: `PORT`, `DB_PATH` | `RAILWAY_VOLUME_MOUNT_PATH`/app.db | ./data/app.db, `WEB_DIST`). Test: `cd server && npm test`.
 
 API: `POST /api/register|login|logout`, `GET /api/me`, `POST /api/drills/results`, `GET /api/progress`, `GET /api/health`.
+Hand history (all need auth, strictly per-user; other users' ids give 404; design in `docs/handhistory-design.md`):
+`POST /api/hh` `{hands:[normalized Hand], keepRaw?:bool}` -> `{added,duplicates}` (dedupe on user+site+hand_id; `raw_text` kept only if `keepRaw:true`; names are stored as hashes only; 413 over 2 MB body / 500 hands / 64 KB per hand / 20k hands per user, 429 rate limit, 400 malformed),
+`GET /api/hh?limit&offset&from&to&site&status&street&minEvLoss`, `GET /api/hh/:id`, `DELETE /api/hh` (hands + decisions),
+`POST /api/hh/decisions` `{decisions:[{handRow,street,nodePath,actionIdx,status,reason?,solverFreqs?,evLoss?,rangePreset,engineVer}]}` (replaces rows for the same hand/street/nodePath), `GET /api/hh/decisions?status&street&minEvLoss&handRow&limit&offset`,
+`DELETE /api/me/data` (hands, decisions and drill results; account kept), `GET /api/progress?source=hh` (status `ok` decisions only, plus `byStatus`; never mixed with drill totals; the default response is unchanged).
 Errors are `{error: code}` only (no display text).
 
 Definitions: a drill answer is correct if solver freq of the chosen action >= 0.1 (mixed-aware); `meanChosenFreq` is also returned.

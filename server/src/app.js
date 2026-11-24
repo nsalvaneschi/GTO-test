@@ -46,14 +46,14 @@ function makeLimiter({ max, windowMs }, now) {
   };
 }
 
-async function readJson(req) {
+async function readJson(req, maxBody = MAX_BODY) {
   if (!/^application\/json\b/i.test(req.headers['content-type'] ?? '')) throw new HttpError(415, 'json_required');
   const chunks = []; let size = 0;
   for await (const c of req) {
     size += c.length;
-    if (size > MAX_BODY) throw new HttpError(413, 'too_large');
-    chunks.push(c);
+    if (size <= maxBody) chunks.push(c); // keep draining when oversize so the client sees the 413
   }
+  if (size > maxBody) throw new HttpError(413, 'too_large');
   let v;
   try { v = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { throw new HttpError(400, 'bad_json'); }
   if (v === null || typeof v !== 'object' || Array.isArray(v)) throw new HttpError(400, 'bad_json');
@@ -87,8 +87,96 @@ function validResult(b) {
   if (b.lang !== undefined && !['en', 'es', 'it'].includes(b.lang)) bad('lang');
 }
 
-export function createApp({ db, webDist, now = Date.now, rateLimit = { max: 10, windowMs: 15 * 60000 } }) {
+// Hand-history limits (docs/handhistory-design.md section 2).
+const HH_MAX_BODY = 2 * 1024 * 1024;
+const HH_MAX_HANDS_REQ = 500;
+const HH_MAX_RAW = 64 * 1024;
+const HH_MAX_NORM = 64 * 1024;
+const HH_MAX_DECISIONS_REQ = 500;
+const HH_SITES = ['pokerstars', 'ggpoker'];
+const HH_STREETS = ['preflop', 'flop', 'turn', 'river'];
+const HH_STATUS = ['ok', 'off_tree', 'unsupported', 'approx_only'];
+const CARD_RE = /^[2-9TJQKA][cdhs]$/;
+const HASH_RE = /^[0-9a-f]{64}$/;
+const TOKEN_RE = /^[A-Za-z0-9_.:\-]{1,64}$/;
+const isNum = (x) => typeof x === 'number' && Number.isFinite(x);
+const isCards = (a, max) => Array.isArray(a) && a.length <= max && a.every((c) => typeof c === 'string' && CARD_RE.test(c));
+
+// Builds the stored normalized hand from a whitelist of fields, so plaintext
+// names (or any unknown field) can never reach the DB.
+function normalizeHand(h) {
+  const bad = (f) => { throw new HttpError(400, `invalid_${f}`); };
+  if (h === null || typeof h !== 'object' || Array.isArray(h)) bad('hand');
+  if (!HH_SITES.includes(h.site)) bad('site');
+  if (typeof h.hand_id !== 'string' || !/^[A-Za-z0-9]{1,32}$/.test(h.hand_id)) bad('hand_id');
+  if (!Number.isInteger(h.played_at) || h.played_at <= 0) bad('played_at');
+  if (!h.stakes || !isNum(h.stakes.sb) || !isNum(h.stakes.bb) || h.stakes.sb < 0 || h.stakes.bb <= 0) bad('stakes');
+  if (!Array.isArray(h.seats) || h.seats.length < 2 || h.seats.length > 10) bad('seats');
+  const seats = h.seats.map((s) => {
+    if (!s || !Number.isInteger(s.seat) || s.seat < 1 || s.seat > 10 || typeof s.name_hash !== 'string' ||
+        !HASH_RE.test(s.name_hash) || !isNum(s.stack) || s.stack < 0 || typeof s.is_hero !== 'boolean') bad('seats');
+    return { seat: s.seat, name_hash: s.name_hash, stack: s.stack, is_hero: s.is_hero };
+  });
+  if (seats.filter((s) => s.is_hero).length !== 1) bad('seats');
+  if (h.hero_cards !== null && h.hero_cards !== undefined && !(isCards(h.hero_cards, 2) && h.hero_cards.length === 2)) bad('hero_cards');
+  if (!isCards(h.board, 5)) bad('board');
+  if (!Array.isArray(h.actions) || h.actions.length > 400) bad('actions');
+  const actions = h.actions.map((a) => {
+    if (!a || !HH_STREETS.includes(a.street) || !Number.isInteger(a.seat) ||
+        !['fold', 'check', 'call', 'bet', 'raise', 'allin'].includes(a.kind) ||
+        (a.amount_to !== undefined && a.amount_to !== null && !(isNum(a.amount_to) && a.amount_to >= 0))) bad('actions');
+    return { street: a.street, seat: a.seat, kind: a.kind, amount_to: a.amount_to ?? null };
+  });
+  if (!Array.isArray(h.pot_by_street) || h.pot_by_street.length > 5 || !h.pot_by_street.every((x) => isNum(x) && x >= 0)) bad('pot_by_street');
+  if (h.hero_pos !== undefined && h.hero_pos !== null && (typeof h.hero_pos !== 'string' || !/^[A-Za-z0-9+]{1,8}$/.test(h.hero_pos))) bad('hero_pos');
+  const norm = { site: h.site, hand_id: h.hand_id, played_at: h.played_at, stakes: { sb: h.stakes.sb, bb: h.stakes.bb },
+    seats, hero_cards: h.hero_cards ?? null, board: h.board, actions, pot_by_street: h.pot_by_street };
+  const json = JSON.stringify(norm);
+  if (json.length > HH_MAX_NORM) throw new HttpError(413, 'too_large');
+  return { norm, json, heroPos: h.hero_pos ?? null };
+}
+
+function validDecision(d) {
+  const bad = (f) => { throw new HttpError(400, `invalid_${f}`); };
+  if (!d || typeof d !== 'object') bad('decision');
+  if (!Number.isInteger(d.handRow) || d.handRow < 1) bad('handRow');
+  if (!HH_STREETS.includes(d.street)) bad('street');
+  if (typeof d.nodePath !== 'string' || d.nodePath.length > 200) bad('nodePath');
+  if (!Number.isInteger(d.actionIdx) || d.actionIdx < 0 || d.actionIdx > 15) bad('actionIdx');
+  if (!HH_STATUS.includes(d.status)) bad('status');
+  if (d.reason !== undefined && d.reason !== null && (typeof d.reason !== 'string' || !TOKEN_RE.test(d.reason))) bad('reason');
+  if (typeof d.rangePreset !== 'string' || !TOKEN_RE.test(d.rangePreset)) bad('rangePreset');
+  if (typeof d.engineVer !== 'string' || !TOKEN_RE.test(d.engineVer)) bad('engineVer');
+  if (d.status === 'ok') {
+    const f = d.solverFreqs;
+    if (!Array.isArray(f) || f.length < 1 || f.length > 16 || !f.every((x) => isNum(x) && x >= 0 && x <= 1) ||
+        Math.abs(f.reduce((a, x) => a + x, 0) - 1) > 0.02) bad('solverFreqs');
+    if (d.actionIdx >= f.length) bad('actionIdx');
+    if (!isNum(d.evLoss) || d.evLoss < 0 || d.evLoss > 1e6) bad('evLoss');
+  } else if (d.status !== 'approx_only' && (d.solverFreqs != null || d.evLoss != null)) bad('status');
+  else if (d.solverFreqs != null || d.evLoss != null) {
+    // approx_only may carry values only if well formed
+    if (d.solverFreqs != null && !(Array.isArray(d.solverFreqs) && d.solverFreqs.length <= 16 && d.solverFreqs.every((x) => isNum(x)))) bad('solverFreqs');
+    if (d.evLoss != null && !(isNum(d.evLoss) && d.evLoss >= 0 && d.evLoss <= 1e6)) bad('evLoss');
+  }
+}
+
+const pageOf = (url, dflt = 50) => {
+  const n = (k, d, max) => { const v = url.searchParams.get(k); if (v === null) return d;
+    if (!/^\d{1,9}$/.test(v)) throw new HttpError(400, `invalid_${k}`); return Math.min(Number(v), max); };
+  return { limit: Math.max(1, n('limit', dflt, 200)), offset: n('offset', 0, 1e9) };
+};
+const intParam = (url, k) => { const v = url.searchParams.get(k); if (v === null) return null;
+  if (!/^\d{1,15}$/.test(v)) throw new HttpError(400, `invalid_${k}`); return Number(v); };
+const enumParam = (url, k, allowed) => { const v = url.searchParams.get(k); if (v === null) return null;
+  if (!allowed.includes(v)) throw new HttpError(400, `invalid_${k}`); return v; };
+const numParam = (url, k) => { const v = url.searchParams.get(k); if (v === null) return null;
+  const n = Number(v); if (v === '' || !Number.isFinite(n)) throw new HttpError(400, `invalid_${k}`); return n; };
+
+export function createApp({ db, webDist, now = Date.now, rateLimit = { max: 10, windowMs: 15 * 60000 },
+  hhRateLimit = { max: 30, windowMs: 60000 }, hhMaxHands = 20000 }) {
   const limiter = makeLimiter(rateLimit, now);
+  const hhLimiter = makeLimiter(hhRateLimit, now);
   // Fixed dummy hash so unknown-user logins cost the same as wrong-password ones.
   const dummy = hashPassword('dummy-password');
 
@@ -101,6 +189,20 @@ export function createApp({ db, webDist, now = Date.now, rateLimit = { max: 10, 
     delExpired: db.prepare('DELETE FROM sessions WHERE expires_at <= ?'),
     insRes: db.prepare(`INSERT INTO drill_results (user_id, spot_id, spot_type, hero, hand_combo, action, solver_freqs, ev_loss, ms, lang, created_at)
       VALUES (?,?,?,?,?,?,?,?,?,?,?)`),
+    hhCount: db.prepare('SELECT count(*) c FROM hh_hands WHERE user_id = ?'),
+    hhIns: db.prepare(`INSERT OR IGNORE INTO hh_hands (user_id, site, hand_id, played_at, imported_at, players, hero_pos, norm_json, raw_text)
+      VALUES (?,?,?,?,?,?,?,?,?)`),
+    hhOne: db.prepare('SELECT * FROM hh_hands WHERE id = ? AND user_id = ?'),
+    hhDecOfHand: db.prepare('SELECT * FROM hh_decisions WHERE hand_row = ? AND user_id = ? ORDER BY id'),
+    hhDelDecKey: db.prepare('DELETE FROM hh_decisions WHERE hand_row = ? AND user_id = ? AND street = ? AND node_path = ?'),
+    hhInsDec: db.prepare(`INSERT INTO hh_decisions (hand_row, user_id, street, node_path, action_idx, status, reason, solver_freqs, ev_loss, range_preset, engine_ver, created_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`),
+    hhDelDecs: db.prepare('DELETE FROM hh_decisions WHERE user_id = ?'),
+    hhDelHands: db.prepare('DELETE FROM hh_hands WHERE user_id = ?'),
+    delDrills: db.prepare('DELETE FROM drill_results WHERE user_id = ?'),
+    hhProgress: db.prepare(`SELECT street AS spot_type, action_idx AS action, solver_freqs, ev_loss, created_at
+      FROM hh_decisions WHERE user_id = ? AND status = 'ok'`),
+    hhByStatus: db.prepare('SELECT status, count(*) n FROM hh_decisions WHERE user_id = ? GROUP BY status'),
     results: db.prepare('SELECT spot_type, action, solver_freqs, ev_loss, created_at FROM drill_results WHERE user_id = ?'),
   };
 
@@ -136,6 +238,21 @@ export function createApp({ db, webDist, now = Date.now, rateLimit = { max: 10, 
     q.insSess.run(sha256(token), userId, now() + SESSION_MS);
     send(res, status, body, { 'set-cookie': setCookie(req, token, SESSION_MS / 1000) });
   }
+
+  const inTx = (fn) => { db.exec('BEGIN'); try { const r = fn(); db.exec('COMMIT'); return r; } catch (e) { db.exec('ROLLBACK'); throw e; } };
+  const handSummary = (r) => ({ id: r.id, site: r.site, handId: r.hand_id, playedAt: r.played_at, importedAt: r.imported_at,
+    players: r.players, heroPos: r.hero_pos, hasRaw: r.raw_text !== null });
+  const decOut = (r) => ({ id: r.id, handRow: r.hand_row, street: r.street, nodePath: r.node_path, actionIdx: r.action_idx,
+    status: r.status, reason: r.reason, solverFreqs: r.solver_freqs ? JSON.parse(r.solver_freqs) : null, evLoss: r.ev_loss,
+    rangePreset: r.range_preset, engineVer: r.engine_ver, createdAt: r.created_at });
+  // Shared by hand-list and decision-list filters (all values bound as parameters).
+  const decFilter = (url) => {
+    const w = []; const p = [];
+    const status = enumParam(url, 'status', HH_STATUS); if (status) { w.push('d.status = ?'); p.push(status); }
+    const street = enumParam(url, 'street', HH_STREETS); if (street) { w.push('d.street = ?'); p.push(street); }
+    const min = numParam(url, 'minEvLoss'); if (min !== null) { w.push('d.ev_loss >= ?'); p.push(min); }
+    return { w, p };
+  };
 
   async function api(req, res, path) {
     const m = req.method;
@@ -189,8 +306,116 @@ export function createApp({ db, webDist, now = Date.now, rateLimit = { max: 10, 
       return send(res, 201, { ok: true });
     }
 
+    if (path === '/api/hh' && m === 'POST') {
+      const u = requireUser(req);
+      hhLimiter.hit(`hh|${u.id}`);
+      const b = await readJson(req, HH_MAX_BODY);
+      if (!Array.isArray(b.hands) || b.hands.length < 1) throw new HttpError(400, 'invalid_hands');
+      if (b.hands.length > HH_MAX_HANDS_REQ) throw new HttpError(413, 'too_many_hands');
+      if (b.keepRaw !== undefined && typeof b.keepRaw !== 'boolean') throw new HttpError(400, 'invalid_keepRaw');
+      const rows = b.hands.map((h) => {
+        const n = normalizeHand(h);
+        let raw = null;
+        if (b.keepRaw === true && h.raw_text !== undefined && h.raw_text !== null) {
+          if (typeof h.raw_text !== 'string') throw new HttpError(400, 'invalid_raw_text');
+          if (Buffer.byteLength(h.raw_text) > HH_MAX_RAW) throw new HttpError(413, 'too_large');
+          raw = h.raw_text;
+        }
+        return { ...n, raw };
+      });
+      if (q.hhCount.get(u.id).c + rows.length > hhMaxHands) throw new HttpError(413, 'hand_cap');
+      const t = now();
+      let added = 0;
+      inTx(() => { for (const r of rows) {
+        added += Number(q.hhIns.run(u.id, r.norm.site, r.norm.hand_id, r.norm.played_at, t, r.norm.seats.length, r.heroPos, r.json, r.raw).changes);
+      } });
+      console.log(`hh import user=${u.id} added=${added} duplicates=${rows.length - added}`); // counts only
+      return send(res, 200, { added, duplicates: rows.length - added });
+    }
+
+    if (path === '/api/hh' && m === 'GET') {
+      const u = requireUser(req);
+      const url = new URL(req.url, 'http://x');
+      const { limit, offset } = pageOf(url);
+      const w = ['h.user_id = ?']; const p = [u.id];
+      const from = intParam(url, 'from'); if (from !== null) { w.push('h.played_at >= ?'); p.push(from); }
+      const to = intParam(url, 'to'); if (to !== null) { w.push('h.played_at <= ?'); p.push(to); }
+      const site = enumParam(url, 'site', HH_SITES); if (site) { w.push('h.site = ?'); p.push(site); }
+      const df = decFilter(url);
+      if (df.w.length) { w.push(`EXISTS (SELECT 1 FROM hh_decisions d WHERE d.hand_row = h.id AND d.user_id = h.user_id AND ${df.w.join(' AND ')})`); p.push(...df.p); }
+      const where = w.join(' AND ');
+      const total = db.prepare(`SELECT count(*) c FROM hh_hands h WHERE ${where}`).get(...p).c;
+      const hands = db.prepare(`SELECT h.* FROM hh_hands h WHERE ${where} ORDER BY h.played_at DESC, h.id DESC LIMIT ? OFFSET ?`)
+        .all(...p, limit, offset).map(handSummary);
+      return send(res, 200, { total, limit, offset, hands });
+    }
+
+    if (path === '/api/hh' && m === 'DELETE') {
+      const u = requireUser(req);
+      return send(res, 200, inTx(() => {
+        const decisions = Number(q.hhDelDecs.run(u.id).changes);
+        return { hands: Number(q.hhDelHands.run(u.id).changes), decisions };
+      }));
+    }
+
+    if (path === '/api/hh/decisions' && m === 'POST') {
+      const u = requireUser(req);
+      hhLimiter.hit(`hh|${u.id}`);
+      const b = await readJson(req, HH_MAX_BODY);
+      if (!Array.isArray(b.decisions) || b.decisions.length < 1) throw new HttpError(400, 'invalid_decisions');
+      if (b.decisions.length > HH_MAX_DECISIONS_REQ) throw new HttpError(413, 'too_many_decisions');
+      b.decisions.forEach(validDecision);
+      for (const d of b.decisions) if (!q.hhOne.get(d.handRow, u.id)) throw new HttpError(404, 'not_found');
+      const t = now();
+      inTx(() => { for (const d of b.decisions) {
+        // Re-analysis replaces the rows for the same node.
+        q.hhDelDecKey.run(d.handRow, u.id, d.street, d.nodePath);
+        q.hhInsDec.run(d.handRow, u.id, d.street, d.nodePath, d.actionIdx, d.status, d.reason ?? null,
+          d.solverFreqs != null ? JSON.stringify(d.solverFreqs) : null, d.evLoss ?? null, d.rangePreset, d.engineVer, t);
+      } });
+      return send(res, 201, { saved: b.decisions.length });
+    }
+
+    if (path === '/api/hh/decisions' && m === 'GET') {
+      const u = requireUser(req);
+      const url = new URL(req.url, 'http://x');
+      const { limit, offset } = pageOf(url, 100);
+      const df = decFilter(url);
+      const w = ['d.user_id = ?', ...df.w]; const p = [u.id, ...df.p];
+      const hr = intParam(url, 'handRow'); if (hr !== null) { w.push('d.hand_row = ?'); p.push(hr); }
+      const where = w.join(' AND ');
+      const total = db.prepare(`SELECT count(*) c FROM hh_decisions d WHERE ${where}`).get(...p).c;
+      const decisions = db.prepare(`SELECT d.* FROM hh_decisions d WHERE ${where} ORDER BY d.id DESC LIMIT ? OFFSET ?`)
+        .all(...p, limit, offset).map(decOut);
+      return send(res, 200, { total, limit, offset, decisions });
+    }
+
+    const hhOne = /^\/api\/hh\/(\d{1,15})$/.exec(path);
+    if (hhOne && m === 'GET') {
+      const u = requireUser(req);
+      const r = q.hhOne.get(Number(hhOne[1]), u.id);
+      if (!r) throw new HttpError(404, 'not_found');
+      return send(res, 200, { ...handSummary(r), hand: JSON.parse(r.norm_json), rawText: r.raw_text,
+        decisions: q.hhDecOfHand.all(r.id, u.id).map(decOut) });
+    }
+
+    if (path === '/api/me/data' && m === 'DELETE') {
+      const u = requireUser(req);
+      return send(res, 200, inTx(() => {
+        const decisions = Number(q.hhDelDecs.run(u.id).changes);
+        const hands = Number(q.hhDelHands.run(u.id).changes);
+        return { hands, decisions, drillResults: Number(q.delDrills.run(u.id).changes) };
+      }));
+    }
+
     if (path === '/api/progress' && m === 'GET') {
       const u = requireUser(req);
+      const source = new URL(req.url, 'http://x').searchParams.get('source');
+      if (source === 'hh') { // separate stats source, never summed with drills
+        const byStatus = Object.fromEntries(q.hhByStatus.all(u.id).map((r) => [r.status, Number(r.n)]));
+        return send(res, 200, { source: 'hh', ...summarize(q.hhProgress.all(u.id), now()), byStatus });
+      }
+      if (source !== null && source !== 'drills') throw new HttpError(400, 'invalid_source');
       return send(res, 200, summarize(q.results.all(u.id), now()));
     }
     throw new HttpError(404, 'not_found');

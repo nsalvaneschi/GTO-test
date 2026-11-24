@@ -43,6 +43,39 @@ const MIGRATIONS = [
      raw_text TEXT NOT NULL,
      imported_at INTEGER NOT NULL
    );`,
+  // Hand-history import (docs/handhistory-design.md): replaces the unused stub.
+  `DROP TABLE hand_histories;
+   CREATE TABLE hh_hands (
+     id INTEGER PRIMARY KEY AUTOINCREMENT,
+     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+     site TEXT NOT NULL,
+     hand_id TEXT NOT NULL,
+     played_at INTEGER NOT NULL,
+     imported_at INTEGER NOT NULL,
+     players INTEGER NOT NULL,
+     hero_pos TEXT,
+     norm_json TEXT NOT NULL,
+     raw_text TEXT,
+     UNIQUE (user_id, site, hand_id)
+   );
+   CREATE INDEX hh_hands_user_time ON hh_hands(user_id, played_at);
+   CREATE TABLE hh_decisions (
+     id INTEGER PRIMARY KEY AUTOINCREMENT,
+     hand_row INTEGER NOT NULL REFERENCES hh_hands(id) ON DELETE CASCADE,
+     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+     street TEXT NOT NULL,
+     node_path TEXT NOT NULL,
+     action_idx INTEGER NOT NULL,
+     status TEXT NOT NULL,
+     reason TEXT,
+     solver_freqs TEXT,
+     ev_loss REAL,
+     range_preset TEXT NOT NULL,
+     engine_ver TEXT NOT NULL,
+     created_at INTEGER NOT NULL
+   );
+   CREATE INDEX hh_decisions_user ON hh_decisions(user_id, status, street);
+   CREATE INDEX hh_decisions_hand ON hh_decisions(hand_row);`,
 ];
 
 export function openDb(path) {
