@@ -5,7 +5,8 @@
   "scripts": {
     "build:wasm": "cargo build --manifest-path ../engine/Cargo.toml -p gto-wasm --release --target wasm32-unknown-unknown && wasm-bindgen --target web --out-dir src/wasm ../engine/target/wasm32-unknown-unknown/release/gto_wasm.wasm",
     "dev": "vite",
-    "build": "tsc --noEmit && vite build",
+    "build": "tsc --noEmit && vite build && node scripts/check-dist.cjs",
+    "check:dist": "node scripts/check-dist.cjs",
     "test": "vitest run",
     "i18n:review": "node scripts/i18n-review.cjs",
     "test:browser": "node tests/browser.cjs",
