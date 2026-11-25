@@ -6,11 +6,12 @@
     "build:wasm": "cargo build --manifest-path ../engine/Cargo.toml -p gto-wasm --release --target wasm32-unknown-unknown && wasm-bindgen --target web --out-dir src/wasm ../engine/target/wasm32-unknown-unknown/release/gto_wasm.wasm",
     "dev": "vite",
     "build": "tsc --noEmit && vite build && node scripts/check-dist.cjs",
+    "build:e2e": "vite build --mode e2e --outDir dist-e2e",
     "check:dist": "node scripts/check-dist.cjs",
     "test": "vitest run",
     "i18n:review": "node scripts/i18n-review.cjs",
     "test:browser": "node tests/browser.cjs",
-    "test:e2e": "node tests/e2e.cjs && node tests/e2e-hh.cjs && node tests/e2e-hh-replay.cjs && node tests/e2e-mobile.cjs && node tests/e2e-adversarial.cjs && node tests/e2e-nav.cjs",
+    "test:e2e": "node tests/e2e.cjs && node tests/e2e-hh.cjs && node tests/e2e-hh-replay.cjs && node tests/e2e-mobile.cjs && node tests/e2e-adversarial.cjs && node tests/e2e-nav.cjs && node tests/e2e-preflop3.cjs",
     "hh:check": "node --experimental-transform-types --no-warnings scripts/hh-check.mjs"
   },
   "devDependencies": {

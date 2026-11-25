@@ -38,3 +38,13 @@
 | replay (hand replay) | repetición | replay |
 | played hands (progress tab) | manos jugadas | mani giocate |
 | mistake (EV loss above a threshold) | error | errore |
+| 3-bet / 3-BET (button) | 3-bet / 3-BET | 3-bet / 3-BET |
+| all-in / ALL-IN (button) | all-in / ALL-IN | all-in / ALL-IN |
+| raise (button, verb) / raises (seat chip) | subir / sube a | rilancia / rilancia a |
+| fold (seat chip) / calls (seat chip) | se retira / iguala | passa / chiama |
+| BTN / SB / BB | BTN / SB / BB | BTN / SB / BB |
+| pot odds / stack-to-pot ratio | pot odds / relación stack-bote | pot odds / rapporto stack-piatto |
+| solution pack | paquete de soluciones | pacchetto di soluzioni |
+| verified / unverified / test data | verificado / sin verificar / datos de prueba | verificato / non verificato / dati di test |
+| scoreboard (session / all time) | marcador (sesión / histórico) | punteggio (sessione / storico) |
+

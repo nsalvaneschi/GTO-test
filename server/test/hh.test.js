@@ -170,7 +170,7 @@ test('migration on an existing DB with drill data is idempotent and keeps data',
       VALUES (1,'rfi:btn','rfi',0,'AsKd',0,'[1]',0.1,10,5);`);
   db.close();
   db = openDb(path); // runs the HH migration
-  assert.equal(db.prepare('PRAGMA user_version').get().user_version, 3);
+  assert.equal(db.prepare('PRAGMA user_version').get().user_version, 4); // latest migration (preflop3 meta column)
   assert.equal(db.prepare('SELECT count(*) c FROM drill_results').get().c, 1);
   assert.equal(db.prepare("SELECT count(*) c FROM sqlite_master WHERE name='hand_histories'").get().c, 0);
   assert.equal(db.prepare("SELECT count(*) c FROM sqlite_master WHERE name IN ('hh_hands','hh_decisions')").get().c, 2);

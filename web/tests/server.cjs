@@ -4,13 +4,13 @@ const { spawn } = require('child_process');
 const fs = require('fs'), os = require('os'), path = require('path');
 const root = path.join(__dirname, '..', '..');
 
-exports.startServer = async (port, prefix) => {
+exports.startServer = async (port, prefix, webDist = path.join(root, 'web/dist')) => {
   const base = `http://localhost:${port}`;
   let stale = false;
   try { stale = (await fetch(base + '/api/health')).ok; } catch { /* nothing listening: good */ }
   if (stale) throw new Error(`port ${port} already serves /api/health (stale server?); stop it first`);
   const tmp = fs.mkdtempSync(path.join(process.env.E2E_TMP || os.tmpdir(), prefix));
-  const srv = spawn('node', ['server/src/index.js'], { cwd: root, env: { ...process.env, PORT: String(port), DB_PATH: path.join(tmp, 'app.db'), WEB_DIST: path.join(root, 'web/dist') } });
+  const srv = spawn('node', ['server/src/index.js'], { cwd: root, env: { ...process.env, PORT: String(port), DB_PATH: path.join(tmp, 'app.db'), WEB_DIST: webDist } });
   let log = '', exited = null;
   srv.stdout.on('data', (d) => { log += d; }); srv.stderr.on('data', (d) => { log += d; });
   srv.on('exit', (c) => { exited = c; });

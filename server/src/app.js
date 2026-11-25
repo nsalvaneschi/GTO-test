@@ -84,7 +84,8 @@ const COMBO_RE = /^[2-9TJQKA][cdhs][2-9TJQKA][cdhs]$/;
 function validResult(b) {
   const bad = (f) => { throw new HttpError(400, `invalid_${f}`); };
   if (typeof b.spotId !== 'string' || !SPOT_ID_RE.test(b.spotId)) bad('spotId');
-  if (b.hero !== 0 && b.hero !== 1) bad('hero');
+  const p3 = b.spotId.startsWith('preflop3:'); // 3-handed: hero = position index (BTN 0, SB 1, BB 2)
+  if (b.hero !== 0 && b.hero !== 1 && !(p3 && b.hero === 2)) bad('hero');
   if (typeof b.handCombo !== 'string' || !COMBO_RE.test(b.handCombo)) bad('handCombo');
   const f = b.solverFreqs;
   if (!Array.isArray(f) || f.length < 1 || f.length > 16 ||
@@ -95,6 +96,19 @@ function validResult(b) {
   if (typeof b.evLoss !== 'number' || !Number.isFinite(b.evLoss) || b.evLoss < 0 || b.evLoss > 1e6) bad('evLoss');
   if (!Number.isInteger(b.ms) || b.ms < 0 || b.ms > 3600000) bad('ms');
   if (b.lang !== undefined && !['en', 'es', 'it'].includes(b.lang)) bad('lang');
+  if (p3 && !PREFLOP3_SPOT_RE.test(b.spotId)) bad('spotId');
+  if (p3 || b.meta !== undefined) validMeta(b.meta, p3, bad);
+}
+// preflop3 results carry {packId, verification, verdict} (+ optional evKnown); verdict is aggregated server-side.
+const PREFLOP3_SPOT_RE = /^preflop3:(1[0-9]|2[0-9]|[1-9]):[A-Za-z0-9_]{1,16}:(BTN|SB|BB)$/;
+const META_KEYS = ['packId', 'verification', 'verdict', 'evKnown'];
+function validMeta(m, required, bad) {
+  if (m === undefined && !required) return;
+  if (m === null || typeof m !== 'object' || Array.isArray(m) || Object.keys(m).some((k) => !META_KEYS.includes(k))) bad('meta');
+  if (typeof m.packId !== 'string' || !/^[A-Za-z0-9_.\-]{1,64}$/.test(m.packId)) bad('meta');
+  if (!['external-verified', 'self-computed-unverified', 'test-fixture'].includes(m.verification)) bad('meta');
+  if (!['correct', 'close', 'incorrect'].includes(m.verdict)) bad('meta');
+  if (m.evKnown !== undefined && typeof m.evKnown !== 'boolean') bad('meta');
 }
 
 // Hand-history limits (docs/handhistory-design.md section 2).
@@ -203,8 +217,9 @@ export function createApp({ db, webDist, now = Date.now, rateLimit = { max: 10, 
     setPw: db.prepare('UPDATE users SET pw_hash = ? WHERE id = ?'),
     delUser: db.prepare('DELETE FROM users WHERE id = ?'),
     delExpired: db.prepare('DELETE FROM sessions WHERE expires_at <= ?'),
-    insRes: db.prepare(`INSERT INTO drill_results (user_id, spot_id, spot_type, hero, hand_combo, action, solver_freqs, ev_loss, ms, lang, created_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?)`),
+    insRes: db.prepare(`INSERT INTO drill_results (user_id, spot_id, spot_type, hero, hand_combo, action, solver_freqs, ev_loss, ms, lang, created_at, meta)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`),
+    p3ByVerdict: db.prepare("SELECT json_extract(meta, '$.verdict') v, count(*) n FROM drill_results WHERE user_id = ? AND spot_type = 'preflop3' GROUP BY v"),
     hhCount: db.prepare('SELECT count(*) c FROM hh_hands WHERE user_id = ?'),
     hhIns: db.prepare(`INSERT OR IGNORE INTO hh_hands (user_id, site, hand_id, played_at, imported_at, players, hero_pos, norm_json, raw_text)
       VALUES (?,?,?,?,?,?,?,?,?)`),
@@ -219,7 +234,7 @@ export function createApp({ db, webDist, now = Date.now, rateLimit = { max: 10, 
     hhProgress: db.prepare(`SELECT street AS spot_type, action_idx AS action, solver_freqs, ev_loss, created_at
       FROM hh_decisions WHERE user_id = ? AND status = 'ok'`),
     hhByStatus: db.prepare('SELECT status, count(*) n FROM hh_decisions WHERE user_id = ? GROUP BY status'),
-    results: db.prepare('SELECT spot_type, action, solver_freqs, ev_loss, created_at FROM drill_results WHERE user_id = ?'),
+    results: db.prepare("SELECT spot_type, action, solver_freqs, ev_loss, created_at FROM drill_results WHERE user_id = ? AND spot_type != 'preflop3'"),
   };
 
   // x-forwarded-* are client-controlled unless a trusted proxy (Railway) sets them: only honoured with trustProxy.
@@ -347,7 +362,7 @@ export function createApp({ db, webDist, now = Date.now, rateLimit = { max: 10, 
       const b = await readJson(req);
       validResult(b);
       q.insRes.run(u.id, b.spotId, spotTypeOf(b.spotId), b.hero, b.handCombo, b.action,
-        JSON.stringify(b.solverFreqs), b.evLoss, b.ms, b.lang ?? null, now());
+        JSON.stringify(b.solverFreqs), b.evLoss, b.ms, b.lang ?? null, now(), b.meta === undefined ? null : JSON.stringify(b.meta));
       return send(res, 201, { ok: true });
     }
 
@@ -459,6 +474,12 @@ export function createApp({ db, webDist, now = Date.now, rateLimit = { max: 10, 
       if (source === 'hh') { // separate stats source, never summed with drills
         const byStatus = Object.fromEntries(q.hhByStatus.all(u.id).map((r) => [r.status, Number(r.n)]));
         return send(res, 200, { source: 'hh', ...summarize(q.hhProgress.all(u.id), now()), byStatus });
+      }
+      if (source === 'preflop3') { // own group; accuracy = correct / total (close counts as incorrect, like the client)
+        const c = { correct: 0, close: 0, incorrect: 0 };
+        for (const r of q.p3ByVerdict.all(u.id)) if (r.v in c) c[r.v] = Number(r.n);
+        const total = c.correct + c.close + c.incorrect;
+        return send(res, 200, { source: 'preflop3', total, ...c, accuracy: total ? c.correct / total : null });
       }
       if (source !== null && source !== 'drills') throw new HttpError(400, 'invalid_source');
       return send(res, 200, summarize(q.results.all(u.id), now()));

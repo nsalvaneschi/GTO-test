@@ -4,6 +4,7 @@ import { t, fmt, locales, type Lang, type Key } from './i18n';
 import { parseRange, presets, R } from './ranges';
 import { api, ApiError, setUnauthorizedHandler, type HhProgress, type Progress } from './api';
 import { renderHh } from './hh/screen';
+import { renderPreflop3 } from './preflop3/screen';
 import { hhSub, setHhRoute } from './hh/pages';
 import { engineErrKey, normalizeBoard, validChips } from './validate';
 import { H, combos, comboName, stepOf, cardName, randomBoard, freqsFor, evLossPct, isCorrect, verdictOf, spotId, samplePath, type Street, nodeType, isFacing, type Step, type NodeType, SUITS, RANKS } from './drill';
@@ -14,7 +15,7 @@ const sizes = [0.5, 1];
 const colors = { fold: 'var(--fold)', check: 'var(--call)', call: 'var(--call)', bet: ['var(--b1)', 'var(--b2)', 'var(--b3)'] };
 
 interface View { kind: string; player: number; n: number; strategy: number[]; range: number[]; action_ev?: number[]; opp_mass?: number[] }
-type Screen = 'solver' | 'drill' | 'progress' | 'hh' | 'auth';
+type Screen = 'solver' | 'drill' | 'preflop3' | 'progress' | 'hh' | 'auth';
 const DRILL = { pot: 10, stack: 50 };
 let screen: Screen = 'solver';
 let owner: 'solver' | 'drill' = 'solver';
@@ -88,7 +89,7 @@ let theme: 'dark' | 'light' = (() => {
 const applyTheme = () => { document.documentElement.dataset.theme = theme; };
 
 function render() {
-  const nav = (['solver', 'drill', 'progress', 'hh'] as const).map((s) => `<button data-nav="${s}" ${screen === s ? 'aria-current="page"' : ''}>${icon[s]}<span>${tr(('nav.' + s) as Key)}</span></button>`).join('');
+  const nav = (['solver', 'drill', 'preflop3', 'progress', 'hh'] as const).map((s) => `<button data-nav="${s}" ${screen === s ? 'aria-current="page"' : ''}>${icon[s]}<span>${tr(('nav.' + s) as Key)}</span></button>`).join('');
   const who = user
     ? `<span class="who" id="whoami" data-user="${esc(user)}"><b class="avatar">${esc(user[0] ?? '?')}</b><span class="who-text">${esc(tr('auth.loggedAs', { name: user }))}</span></span><button id="logout" class="ghost" aria-label="${tr('auth.logout')}" title="${tr('auth.logout')}">${icon.logout}<span class="lbl">${tr('auth.logout')}</span></button>`
     : `<button data-nav="auth" id="to-auth" class="primary">${tr('auth.login')}</button>`;
@@ -108,12 +109,13 @@ function render() {
   if (screen === 'solver') renderSolver();
   else if (screen === 'drill') renderDrill();
   else if (screen === 'progress') renderProgress();
+  else if (screen === 'preflop3') renderPreflop3($('screen'), { tr, lang, user, errText, codeOf });
   else if (screen === 'hh') renderHh($('screen'), { tr, lang, user, errText, codeOf, nav: pushHash });
   else renderAuth();
 }
 
 // Hash routes (History API, no server config): #/solver #/practice #/progress #/hands[/list|/<id>]. Auth is not a route.
-const ROUTE: Record<string, Screen> = { solver: 'solver', practice: 'drill', progress: 'progress', hands: 'hh' };
+const ROUTE: Record<string, Screen> = { solver: 'solver', practice: 'drill', preflop3: 'preflop3', progress: 'progress', hands: 'hh' };
 const hashOf = (s: Screen) => '#/' + (s === 'hh' ? 'hands' + (hhSub() ? '/' + hhSub() : '') : Object.keys(ROUTE).find((k) => ROUTE[k] === s));
 function pushHash(mode: 'push' | 'replace' = 'push') {
   if (screen === 'auth') return;
@@ -121,7 +123,7 @@ function pushHash(mode: 'push' | 'replace' = 'push') {
   if (location.hash !== h) history[mode === 'push' ? 'pushState' : 'replaceState'](null, '', h);
 }
 function applyHash() {
-  const m = /^#\/(solver|practice|progress|hands)(?:\/(.*))?$/.exec(location.hash);
+  const m = /^#\/(solver|practice|preflop3|progress|hands)(?:\/(.*))?$/.exec(location.hash);
   if (m && m[1] === 'hands') setHhRoute(m[2] ?? '');
   go(m ? ROUTE[m[1]] : 'solver', 'none');
 }
@@ -556,7 +558,7 @@ function gridHtml(v: View, as: ReturnType<typeof actions>, mark = -1): string {
 
 applyTheme();
 document.documentElement.lang = lang;
-{ const m = /^#\/(solver|practice|progress|hands)(?:\/(.*))?$/.exec(location.hash); if (m) { screen = ROUTE[m[1]]; if (m[1] === 'hands') setHhRoute(m[2] ?? ''); } }
+{ const m = /^#\/(solver|practice|preflop3|progress|hands)(?:\/(.*))?$/.exec(location.hash); if (m) { screen = ROUTE[m[1]]; if (m[1] === 'hands') setHhRoute(m[2] ?? ''); } }
 render();
 // Restore the session after a reload (httpOnly cookie): only touch the UI if nothing else has happened meanwhile.
 api.me().then((m) => { if (!user && screen !== 'auth') { readForm(); user = m.username; render(); } }, () => { /* not logged in or offline: stay logged out */ });

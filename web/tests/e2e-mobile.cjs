@@ -67,6 +67,8 @@ const RUNS = [['iPhone 13', 'it'], ['Galaxy S5', 'it'], ['iPhone 13', 'en']];
         await page.waitForSelector('#result'); await check(`drill-${street}-result`);
         if (street === 'river') { await page.click('[data-nav="solver"]'); await page.click('#solve'); await page.waitForFunction(() => !document.getElementById('solve').disabled, null, { timeout: 120000 }); await page.click('[data-nav="drill"]'); } // a solver run resets the drill to idle
       }
+      await page.click('[data-nav="preflop3"]'); await page.waitForSelector('#p3-empty'); await check('preflop3-empty');
+      assert.strictEqual(await page.$eval('#p3-score', (e) => getComputedStyle(e).position), 'fixed');
       await page.click('[data-nav="progress"]'); await page.waitForSelector('#p-total'); await check('progress');
       await page.click('[data-nav="hh"]'); await page.waitForSelector('#hh-disclaimer');
       await page.fill('#hh-text', 'SYNTHETIC - invented data\n\n' + hand('90000077' + lang.charCodeAt(1)));

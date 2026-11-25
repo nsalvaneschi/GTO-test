@@ -4,3 +4,4 @@ web/src/wasm/
 web/dist/
 web/test-artifacts/
 private-data/
+web/dist-e2e/

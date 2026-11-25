@@ -76,6 +76,10 @@ const MIGRATIONS = [
    );
    CREATE INDEX hh_decisions_user ON hh_decisions(user_id, status, street);
    CREATE INDEX hh_decisions_hand ON hh_decisions(hand_row);`,
+  // preflop3 trainer: nullable JSON meta (packId, verification, verdict) on drill results. Idempotent (skips if the column exists).
+  (db) => {
+    if (!db.prepare('PRAGMA table_info(drill_results)').all().some((c) => c.name === 'meta')) db.exec('ALTER TABLE drill_results ADD COLUMN meta TEXT');
+  },
 ];
 
 export function openDb(path) {
@@ -93,7 +97,7 @@ export function migrate(db) {
   for (let i = v; i < MIGRATIONS.length; i++) {
     db.exec('BEGIN');
     try {
-      db.exec(MIGRATIONS[i]);
+      if (typeof MIGRATIONS[i] === 'function') MIGRATIONS[i](db); else db.exec(MIGRATIONS[i]);
       db.exec(`PRAGMA user_version = ${i + 1}`);
       db.exec('COMMIT');
     } catch (e) {

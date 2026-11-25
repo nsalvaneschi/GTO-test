@@ -59,6 +59,7 @@ export const api = {
   deleteMyData: () => call<{ hands: number; decisions: number; drillResults: number }>('DELETE', '/api/me/data'),
   changePassword: (currentPassword: string, newPassword: string) => call<{ ok: true }>('POST', '/api/me/password', { currentPassword, newPassword }),
   deleteAccount: (password: string) => call<{ ok: true }>('DELETE', '/api/me', { password }),
+  preflop3Progress: () => call<{ source: 'preflop3'; total: number; correct: number; close: number; incorrect: number; accuracy: number | null }>('GET', '/api/progress?source=preflop3'),
   hhProgress: () => call<HhProgress>('GET', '/api/progress?source=hh'),
   hhDecisions: (decisions: unknown[]) => call<{ saved: number }>('POST', '/api/hh/decisions', { decisions }),
 };
