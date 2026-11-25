@@ -1,0 +1,27 @@
+SYNTHETIC - invented data, not a real hand history
+GAME #700000000008 Version:1.0.0.0 Uncalled:Y Texas Hold'em NL $0.10/$0.20 2024-02-01 10:00:00/GMT
+Table Size 6
+Table Synth Eight, 710000008
+Seat 1: V1 ($20 in chips)
+Seat 2: V2 ($20 in chips)
+Seat 4: Hero ($20 in chips)
+Seat 6: V3 ($20 in chips)  DEALER
+V1: Post SB $0.10
+V2: Post BB $0.20
+*** HOLE CARDS ***
+Dealt to Hero [D7 D6]
+Hero: Call $0.20
+V3: Call $0.20
+V1: Call $0.10
+V2: Check
+*** FLOP *** [S2 H9 CK]
+V1: Check
+V2: Check
+Hero: Check
+V3: Bet $0.40
+V1: Fold
+V2: Fold
+Hero: Fold
+*** SUMMARY ***
+Total pot $0.80 Rake $0
+V3: wins $0.80

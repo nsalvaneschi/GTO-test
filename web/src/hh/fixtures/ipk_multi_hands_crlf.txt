@@ -1,0 +1,28 @@
+SYNTHETIC - invented data, not a real hand history
+GAME #700000000015 Version:1.0.0.0 Uncalled:Y Texas Hold'em NL $0.10/$0.20 2024-02-01 11:00:00/GMT
+Table Size 6
+Table Synth Fifteen, 710000015
+Seat 1: V1 (€20 in chips)  DEALER
+Seat 2: Hero (€20 in chips)
+V1: Post SB €0.10
+Hero: Post BB €0.20
+*** HOLE CARDS ***
+Dealt to Hero [SA HA]
+V1: Fold
+*** SUMMARY ***
+Total pot €0.20 Rake €0
+Hero: wins €0.20
+
+GAME #700000000016 Version:1.0.0.0 Uncalled:Y Texas Hold'em NL $0.10/$0.20 2024-02-01 11:05:00/GMT
+Table Size 6
+Table Synth Fifteen, 710000015
+Seat 1: V1 (€20 in chips)
+Seat 2: Hero (€20 in chips)  DEALER
+Hero: Post SB €0.10
+V1: Post BB €0.20
+*** HOLE CARDS ***
+Dealt to Hero [C2 D7]
+Hero: Fold
+*** SUMMARY ***
+Total pot €0.20 Rake €0
+V1: wins €0.20

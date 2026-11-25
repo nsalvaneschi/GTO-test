@@ -1,0 +1,14 @@
+SYNTHETIC - invented data, not a real hand history
+GAME #700000000011 Version:1.0.0.0 Uncalled:Y Omaha PL $0.10/$0.20 2024-02-01 10:00:00/GMT
+Table Size 6
+Table Synth Eleven, 710000011
+Seat 1: V1 ($20 in chips)  DEALER
+Seat 2: Hero ($20 in chips)
+V1: Post SB $0.10
+Hero: Post BB $0.20
+*** HOLE CARDS ***
+Dealt to Hero [SA HA SK HK]
+V1: Fold
+*** SUMMARY ***
+Total pot $0.30 Rake $0
+Hero: wins $0.30

@@ -1,0 +1,25 @@
+SYNTHETIC - invented data, not a real hand history
+GAME #700000000005 Version:1.0.0.0 Uncalled:Y Texas Hold'em NL $0.10/$0.20 2024-02-01 10:00:00/GMT
+Table Size 6
+Table Synth Five, 710000005
+Seat 2: V1 ($20 in chips)  DEALER
+Seat 5: Hero ($20 in chips)
+V1: Post SB $0.10
+Hero: Post BB $0.20
+*** HOLE CARDS ***
+Dealt to Hero [SJ H10]
+V1: Call $0.10
+Hero: Check
+*** FLOP *** [D2 C6 H9]
+Hero: Check
+V1: Check
+*** TURN *** [SQ]
+Hero: Check
+V1: Check
+*** RIVER *** [C3]
+Hero: Check
+V1: Bet $3
+Hero: Fold
+*** SUMMARY ***
+Total pot $0.40 Rake $0
+V1: wins $0.40

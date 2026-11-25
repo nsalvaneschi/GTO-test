@@ -1,0 +1,10 @@
+[
+  {
+    "ok": false,
+    "index": 0,
+    "reason": "bad_structure",
+    "site": "ipoker",
+    "hand_id": "700000000013",
+    "line": 11
+  }
+]

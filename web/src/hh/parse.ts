@@ -1,6 +1,7 @@
 import type {
   Action, ActionKind, Blind, Hand, ParseResult, ParseSummary, ReasonCode, Seat, Site, Street, StreetState, WarningCode,
 } from './types';
+import { IPK_HEADER, IpFail, buildIpoker } from './ipoker.ts';
 
 class Fail extends Error {
   constructor(public reason: ReasonCode, public line?: number) { super(reason); }
@@ -42,7 +43,7 @@ function split(text: string): string[][] {
   let junk = false;
   for (const line of lines) {
     const blank = line.trim() === '' || (!cur && /^SYNTHETIC\b/.test(line));
-    if (prevBlank && !blank && HEADER_LIKE.test(line)) {
+    if (!blank && (IPK_HEADER.test(line) || (prevBlank && HEADER_LIKE.test(line)))) {
       cur = [line];
       chunks.push(cur);
       junk = false;
@@ -77,6 +78,9 @@ function money(s: string, line: number): number {
 }
 
 function build(lines: string[], info: { site?: Site; hand_id?: string }): { hand: Hand; warnings: WarningCode[] } {
+  if (IPK_HEADER.test(lines[0].trim())) {
+    try { return buildIpoker(lines, info); } catch (e) { throw e instanceof IpFail ? new Fail(e.reason, e.line) : e; }
+  }
   const head = HEADER.exec(lines[0].trim());
   if (!head) throw new Fail('unsupported_format', 1);
   const site: Site = head[1].startsWith('PokerStars') ? 'pokerstars' : 'ggpoker';

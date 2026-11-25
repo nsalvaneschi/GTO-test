@@ -74,6 +74,26 @@ test('cross-user access returns 404 and lists are scoped', async () => {
   s.close();
 });
 
+test('ipoker site: import, site filter, dedupe, cross-user isolation (no schema change needed)', async () => {
+  const db = openDb(':memory:');
+  const s = await boot({ db });
+  const a = await s.user('alice'), b = await s.user('bobby');
+  await s.call('POST', '/api/hh', { hands: [hand('1', { played_at: 1000 })] }, a); // pre-existing pokerstars row
+  const ip = (id, o = {}) => hand(id, { site: 'ipoker', ...o });
+  let r = await s.call('POST', '/api/hh', { hands: [ip('1', { played_at: 2000 }), ip('2', { played_at: 3000 })] }, a);
+  assert.deepEqual([r.status, r.json], [200, { added: 2, duplicates: 0 }]); // same hand_id, other site: not a duplicate
+  r = await s.call('POST', '/api/hh', { hands: [ip('1'), ip('3', { played_at: 4000 })] }, a);
+  assert.deepEqual(r.json, { added: 1, duplicates: 1 });
+  const list = await s.call('GET', '/api/hh?site=ipoker', undefined, a);
+  assert.deepEqual(list.json.hands.map((h) => [h.handId, h.site]), [['3', 'ipoker'], ['2', 'ipoker'], ['1', 'ipoker']]);
+  assert.equal((await s.call('GET', '/api/hh?site=pokerstars', undefined, a)).json.total, 1);
+  assert.equal((await s.call('GET', '/api/hh?site=ipoker', undefined, b)).json.total, 0);
+  assert.equal((await s.call('GET', `/api/hh/${list.json.hands[0].id}`, undefined, b)).status, 404);
+  assert.equal((await s.call('POST', '/api/hh', { hands: [hand('9', { site: 'ipoker2' })] }, a)).status, 400);
+  assert.equal((await s.call('POST', '/api/hh', { hands: [ip('1')] }, b)).json.added, 1);
+  s.close();
+});
+
 test('size limits give 413, malformed gives 400', async () => {
   const s = await boot({ hhMaxHands: 3 });
   const c = await s.user('alice');

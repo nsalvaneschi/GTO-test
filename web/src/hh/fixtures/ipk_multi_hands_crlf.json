@@ -1,0 +1,178 @@
+[
+  {
+    "ok": true,
+    "index": 0,
+    "hand": {
+      "site": "ipoker",
+      "hand_id": "700000000015",
+      "played_at": "2024-02-01T11:00:00",
+      "stakes": {
+        "sb": 0.1,
+        "bb": 0.2
+      },
+      "button": 1,
+      "hero": 2,
+      "seats": [
+        {
+          "seat": 1,
+          "name": "V1",
+          "name_hash": null,
+          "stack": 100,
+          "is_hero": false
+        },
+        {
+          "seat": 2,
+          "name": "Hero",
+          "name_hash": null,
+          "stack": 100,
+          "is_hero": true
+        }
+      ],
+      "hero_cards": [
+        "As",
+        "Ah"
+      ],
+      "board": [],
+      "blinds": [
+        {
+          "seat": 1,
+          "kind": "sb",
+          "amount": 0.5
+        },
+        {
+          "seat": 2,
+          "kind": "bb",
+          "amount": 1
+        }
+      ],
+      "actions": [
+        {
+          "street": "preflop",
+          "seat": 1,
+          "kind": "fold",
+          "amount_to": null,
+          "allin": false
+        }
+      ],
+      "pot_by_street": [
+        {
+          "street": "preflop",
+          "pot": 1.5,
+          "stacks": {
+            "1": 99.5,
+            "2": 99
+          }
+        }
+      ],
+      "returned": [
+        {
+          "seat": 2,
+          "amount": 0.5
+        }
+      ],
+      "contributions": {
+        "1": 0.5,
+        "2": 0.5
+      },
+      "final_pot": 1,
+      "collected": {
+        "2": 1
+      },
+      "final_stacks": {
+        "1": 99.5,
+        "2": 100.5
+      },
+      "went_to_showdown": false,
+      "showdown": []
+    },
+    "warnings": []
+  },
+  {
+    "ok": true,
+    "index": 1,
+    "hand": {
+      "site": "ipoker",
+      "hand_id": "700000000016",
+      "played_at": "2024-02-01T11:05:00",
+      "stakes": {
+        "sb": 0.1,
+        "bb": 0.2
+      },
+      "button": 2,
+      "hero": 2,
+      "seats": [
+        {
+          "seat": 1,
+          "name": "V1",
+          "name_hash": null,
+          "stack": 100,
+          "is_hero": false
+        },
+        {
+          "seat": 2,
+          "name": "Hero",
+          "name_hash": null,
+          "stack": 100,
+          "is_hero": true
+        }
+      ],
+      "hero_cards": [
+        "2c",
+        "7d"
+      ],
+      "board": [],
+      "blinds": [
+        {
+          "seat": 2,
+          "kind": "sb",
+          "amount": 0.5
+        },
+        {
+          "seat": 1,
+          "kind": "bb",
+          "amount": 1
+        }
+      ],
+      "actions": [
+        {
+          "street": "preflop",
+          "seat": 2,
+          "kind": "fold",
+          "amount_to": null,
+          "allin": false
+        }
+      ],
+      "pot_by_street": [
+        {
+          "street": "preflop",
+          "pot": 1.5,
+          "stacks": {
+            "1": 99,
+            "2": 99.5
+          }
+        }
+      ],
+      "returned": [
+        {
+          "seat": 1,
+          "amount": 0.5
+        }
+      ],
+      "contributions": {
+        "1": 0.5,
+        "2": 0.5
+      },
+      "final_pot": 1,
+      "collected": {
+        "1": 1
+      },
+      "final_stacks": {
+        "1": 100.5,
+        "2": 99.5
+      },
+      "went_to_showdown": false,
+      "showdown": []
+    },
+    "warnings": []
+  }
+]

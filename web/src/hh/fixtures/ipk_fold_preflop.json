@@ -1,0 +1,96 @@
+[
+  {
+    "ok": true,
+    "index": 0,
+    "hand": {
+      "site": "ipoker",
+      "hand_id": "700000000006",
+      "played_at": "2024-02-01T10:00:00",
+      "stakes": {
+        "sb": 0.1,
+        "bb": 0.2
+      },
+      "button": 4,
+      "hero": null,
+      "seats": [
+        {
+          "seat": 4,
+          "name": "V1",
+          "name_hash": null,
+          "stack": 100,
+          "is_hero": false
+        },
+        {
+          "seat": 6,
+          "name": "V2",
+          "name_hash": null,
+          "stack": 100,
+          "is_hero": false
+        }
+      ],
+      "hero_cards": null,
+      "board": [],
+      "blinds": [
+        {
+          "seat": 4,
+          "kind": "sb",
+          "amount": 0.5
+        },
+        {
+          "seat": 6,
+          "kind": "bb",
+          "amount": 1
+        }
+      ],
+      "actions": [
+        {
+          "street": "preflop",
+          "seat": 4,
+          "kind": "raise",
+          "amount_to": 2.5,
+          "allin": false
+        },
+        {
+          "street": "preflop",
+          "seat": 6,
+          "kind": "fold",
+          "amount_to": null,
+          "allin": false
+        }
+      ],
+      "pot_by_street": [
+        {
+          "street": "preflop",
+          "pot": 1.5,
+          "stacks": {
+            "4": 99.5,
+            "6": 99
+          }
+        }
+      ],
+      "returned": [
+        {
+          "seat": 4,
+          "amount": 1.5
+        }
+      ],
+      "contributions": {
+        "4": 1,
+        "6": 1
+      },
+      "final_pot": 2,
+      "collected": {
+        "4": 2
+      },
+      "final_stacks": {
+        "4": 101,
+        "6": 99
+      },
+      "went_to_showdown": false,
+      "showdown": []
+    },
+    "warnings": [
+      "no_hero"
+    ]
+  }
+]

@@ -65,7 +65,7 @@ export function renderHands(el: HTMLElement, c: Ctx, toImport: () => void) {
     <div class="row"><button id="hh-confirm-no">${tr('hh.cancel')}</button><button id="hh-confirm-yes" class="danger">${tr('hh.data.confirm')}</button></div></div></div>` : '';
   el.innerHTML = `${head}
     <div id="hh-filters" class="panel toolbar">
-      ${sel('site', [any, ['pokerstars', tr('hh.site.pokerstars')], ['ggpoker', tr('hh.site.ggpoker')]])}
+      ${sel('site', [any, ['pokerstars', tr('hh.site.pokerstars')], ['ggpoker', tr('hh.site.ggpoker')], ['ipoker', tr('hh.site.ipoker')]])}
       <label>${tr('hh.filter.from')}<input id="f-from" type="date" value="${esc(f.from ?? '')}"></label>
       <label>${tr('hh.filter.to')}<input id="f-to" type="date" value="${esc(f.to ?? '')}"></label>
       ${sel('status', [any, ['ok', tr('hh.status.ok')], ['unsupported', tr('hh.status.unsupported')], ['off_tree', tr('hh.status.off_tree')], ['approx_only', tr('hh.status.approx_only')]])}

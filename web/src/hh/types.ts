@@ -1,11 +1,11 @@
 // Normalized hand-history schema (docs/handhistory-design.md). Amounts are in big blinds
 // (rounded to 4 decimals) except `stakes`, which is in the hand's currency units.
-export type Site = 'pokerstars' | 'ggpoker';
+export type Site = 'pokerstars' | 'ggpoker' | 'ipoker';
 export type Street = 'preflop' | 'flop' | 'turn' | 'river';
 export type ActionKind = 'fold' | 'check' | 'call' | 'bet' | 'raise' | 'allin';
 
 export type ReasonCode =
-  | 'unsupported_format' // not a PokerStars/GGPoker English header
+  | 'unsupported_format' // not a PokerStars/GGPoker/iPoker English header
   | 'tournament'
   | 'unsupported_game' // PLO, limit, other variants
   | 'run_it_twice'

@@ -1,0 +1,209 @@
+[
+  {
+    "ok": true,
+    "index": 0,
+    "hand": {
+      "site": "ipoker",
+      "hand_id": "700000000003",
+      "played_at": "2024-02-01T10:00:00",
+      "stakes": {
+        "sb": 0.1,
+        "bb": 0.2
+      },
+      "button": 8,
+      "hero": 8,
+      "seats": [
+        {
+          "seat": 2,
+          "name": "V1",
+          "name_hash": null,
+          "stack": 100,
+          "is_hero": false
+        },
+        {
+          "seat": 3,
+          "name": "V2",
+          "name_hash": null,
+          "stack": 100,
+          "is_hero": false
+        },
+        {
+          "seat": 5,
+          "name": "V3",
+          "name_hash": null,
+          "stack": 150,
+          "is_hero": false
+        },
+        {
+          "seat": 6,
+          "name": "V4",
+          "name_hash": null,
+          "stack": 100,
+          "is_hero": false
+        },
+        {
+          "seat": 8,
+          "name": "Hero",
+          "name_hash": null,
+          "stack": 100,
+          "is_hero": true
+        },
+        {
+          "seat": 10,
+          "name": "V5",
+          "name_hash": null,
+          "stack": 100,
+          "is_hero": false
+        }
+      ],
+      "hero_cards": [
+        "Qh",
+        "Jh"
+      ],
+      "board": [
+        "5s",
+        "9d",
+        "9c"
+      ],
+      "blinds": [
+        {
+          "seat": 10,
+          "kind": "sb",
+          "amount": 0.5
+        },
+        {
+          "seat": 2,
+          "kind": "bb",
+          "amount": 1
+        }
+      ],
+      "actions": [
+        {
+          "street": "preflop",
+          "seat": 3,
+          "kind": "fold",
+          "amount_to": null,
+          "allin": false
+        },
+        {
+          "street": "preflop",
+          "seat": 5,
+          "kind": "fold",
+          "amount_to": null,
+          "allin": false
+        },
+        {
+          "street": "preflop",
+          "seat": 6,
+          "kind": "raise",
+          "amount_to": 2.5,
+          "allin": false
+        },
+        {
+          "street": "preflop",
+          "seat": 8,
+          "kind": "call",
+          "amount_to": 2.5,
+          "allin": false
+        },
+        {
+          "street": "preflop",
+          "seat": 10,
+          "kind": "raise",
+          "amount_to": 10,
+          "allin": false
+        },
+        {
+          "street": "preflop",
+          "seat": 2,
+          "kind": "fold",
+          "amount_to": null,
+          "allin": false
+        },
+        {
+          "street": "preflop",
+          "seat": 6,
+          "kind": "fold",
+          "amount_to": null,
+          "allin": false
+        },
+        {
+          "street": "preflop",
+          "seat": 8,
+          "kind": "call",
+          "amount_to": 10,
+          "allin": false
+        },
+        {
+          "street": "flop",
+          "seat": 10,
+          "kind": "bet",
+          "amount_to": 12.5,
+          "allin": false
+        },
+        {
+          "street": "flop",
+          "seat": 8,
+          "kind": "fold",
+          "amount_to": null,
+          "allin": false
+        }
+      ],
+      "pot_by_street": [
+        {
+          "street": "preflop",
+          "pot": 1.5,
+          "stacks": {
+            "2": 99,
+            "3": 100,
+            "5": 150,
+            "6": 100,
+            "8": 100,
+            "10": 99.5
+          }
+        },
+        {
+          "street": "flop",
+          "pot": 23.5,
+          "stacks": {
+            "2": 99,
+            "3": 100,
+            "5": 150,
+            "6": 97.5,
+            "8": 90,
+            "10": 90
+          }
+        }
+      ],
+      "returned": [
+        {
+          "seat": 10,
+          "amount": 12.5
+        }
+      ],
+      "contributions": {
+        "2": 1,
+        "3": 0,
+        "5": 0,
+        "6": 2.5,
+        "8": 10,
+        "10": 10
+      },
+      "final_pot": 23.5,
+      "collected": {
+        "10": 22.5
+      },
+      "final_stacks": {
+        "2": 99,
+        "3": 100,
+        "5": 150,
+        "6": 97.5,
+        "8": 90,
+        "10": 112.5
+      },
+      "went_to_showdown": false,
+      "showdown": []
+    },
+    "warnings": []
+  }
+]

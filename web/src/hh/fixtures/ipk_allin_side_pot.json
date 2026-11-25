@@ -1,0 +1,172 @@
+[
+  {
+    "ok": true,
+    "index": 0,
+    "hand": {
+      "site": "ipoker",
+      "hand_id": "700000000004",
+      "played_at": "2024-02-01T10:00:00",
+      "stakes": {
+        "sb": 0.1,
+        "bb": 0.2
+      },
+      "button": 1,
+      "hero": 1,
+      "seats": [
+        {
+          "seat": 1,
+          "name": "Hero",
+          "name_hash": null,
+          "stack": 50,
+          "is_hero": true
+        },
+        {
+          "seat": 2,
+          "name": "V1",
+          "name_hash": null,
+          "stack": 150,
+          "is_hero": false
+        },
+        {
+          "seat": 3,
+          "name": "V2",
+          "name_hash": null,
+          "stack": 100,
+          "is_hero": false
+        }
+      ],
+      "hero_cards": [
+        "As",
+        "Ah"
+      ],
+      "board": [
+        "2s",
+        "7d",
+        "9c",
+        "3h",
+        "4d"
+      ],
+      "blinds": [
+        {
+          "seat": 2,
+          "kind": "sb",
+          "amount": 0.5
+        },
+        {
+          "seat": 3,
+          "kind": "bb",
+          "amount": 1
+        }
+      ],
+      "actions": [
+        {
+          "street": "preflop",
+          "seat": 1,
+          "kind": "allin",
+          "amount_to": 50,
+          "allin": true
+        },
+        {
+          "street": "preflop",
+          "seat": 2,
+          "kind": "allin",
+          "amount_to": 150,
+          "allin": true
+        },
+        {
+          "street": "preflop",
+          "seat": 3,
+          "kind": "call",
+          "amount_to": 100,
+          "allin": true
+        }
+      ],
+      "pot_by_street": [
+        {
+          "street": "preflop",
+          "pot": 1.5,
+          "stacks": {
+            "1": 50,
+            "2": 149.5,
+            "3": 99
+          }
+        },
+        {
+          "street": "flop",
+          "pot": 300,
+          "stacks": {
+            "1": 0,
+            "2": 0,
+            "3": 0
+          }
+        },
+        {
+          "street": "turn",
+          "pot": 300,
+          "stacks": {
+            "1": 0,
+            "2": 0,
+            "3": 0
+          }
+        },
+        {
+          "street": "river",
+          "pot": 300,
+          "stacks": {
+            "1": 0,
+            "2": 0,
+            "3": 0
+          }
+        }
+      ],
+      "returned": [
+        {
+          "seat": 2,
+          "amount": 50
+        }
+      ],
+      "contributions": {
+        "1": 50,
+        "2": 100,
+        "3": 100
+      },
+      "final_pot": 250,
+      "collected": {
+        "1": 150,
+        "2": 100
+      },
+      "final_stacks": {
+        "1": 150,
+        "2": 150,
+        "3": 0
+      },
+      "went_to_showdown": true,
+      "showdown": [
+        {
+          "seat": 1,
+          "cards": [
+            "As",
+            "Ah"
+          ]
+        },
+        {
+          "seat": 2,
+          "cards": [
+            "Kd",
+            "Kc"
+          ]
+        },
+        {
+          "seat": 3,
+          "cards": [
+            "Qh",
+            "Qs"
+          ]
+        }
+      ]
+    },
+    "warnings": [
+      "side_pots"
+    ]
+  }
+]
