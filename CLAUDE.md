@@ -33,3 +33,8 @@ Escalate only on failure or genuine design ambiguity; de-escalate once the desig
 - Backend: small Node server in `server/` serving `web/dist` + JSON API, SQLite on a persistent volume (path from env, e.g. `RAILWAY_VOLUME_MOUNT_PATH`); deploy target Railway. Never put secrets/tokens in the repo; deploy config via env vars.
 - Progress tracked per user: drill results (spot, user action, solver frequencies, EV loss, time) first; hand-history analysis later (needs `architect` design).
 - All new UI text goes through the en/es/it i18n rules above.
+
+## Preflop 3-handed trainer (requirement)
+- Product goal: preflop-only trainer, 3-handed BTN/SB/BB, stacks 20/18/16 BB (+ random mix), random spots, action chosen BEFORE the solution, scored against mixed GTO frequencies; permanent bottom counter (correct, incorrect, total, accuracy %). Design: `docs/preflop3-design.md`.
+- DATA RULE: never invent ranges and never label a strategy GTO unless it comes from an external solver pack (`external-verified`). Self-computed packs must show a visible 'unverified' badge. Test fixtures (`test-fixture`) must never ship in production builds.
+- Licensed third-party solutions stay in git-ignored `private-data/reference/` or are imported in the browser only.
