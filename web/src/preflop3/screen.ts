@@ -143,10 +143,10 @@ function draw(): void {
     const cards = `<div class="p3-hero-cards" id="p3-cards" data-hand="${h.deal.hand}" data-class="${h.pack.classes[h.deal.classIdx]}" role="group" aria-label="${tr('preflop3.hand.aria', { cards: h.deal.cards.join(' ') })}">${h.deal.cards.map((x) => cardTile(x, 'lg')).join('')}</div>`;
     let action: string;
     if (!S.result) {
-      action = `<p class="muted small p3-prompt">${tr('preflop3.prompt')}</p><div class="p3-acts" id="p3-acts">${h.views.map((v) => {
+      action = `<p class="muted small p3-prompt">${tr('preflop3.prompt')}</p><div class="p3-dock"><div class="p3-acts" id="p3-acts" data-n="${h.views.length}">${h.views.map((v) => {
         const k = BUTTON_KEY[v.button], label = btnLabel(v);
         return `<button class="p3-act" data-action="${esc(v.actionId)}" data-btn="${v.button}" style="--c:${BUTTON_COLOR[v.button]}" aria-label="${esc(tr('preflop3.btn.aria', { label: actLabel(v), key: k }))}"><span class="lbl">${label}</span>${v.sizeBb !== null ? `<span class="sz">${n2(v.sizeBb)}</span>` : ''}<kbd aria-hidden="true">${k}</kbd></button>`;
-      }).join('')}</div>`;
+      }).join('')}</div></div>`;
     } else action = resultHtml(h, S.result);
     return `${badge}${table}<div class="p3-situation"><p id="p3-situation" class="p3-sit">${esc(sitTxt)}</p>${cards}</div>${action}`;
   }
@@ -158,7 +158,7 @@ function draw(): void {
     const cls = r.verdict === 'correct' ? 'right' : r.verdict === 'close' ? 'close' : 'wrong';
     const detail = tr('preflop3.verdict.detail', { action: label(r.actionId), freq: pct(x.chosenFreq), hand: x.handClass })
       + (r.verdict === 'close' && x.evLoss !== null ? ' ' + tr('preflop3.verdict.closeNote', { ev: n2(x.evLoss) }) : '');
-    const banner = `<div id="p3-verdict" class="verdict ${cls}" data-verdict="${r.verdict}" data-freq="${x.chosenFreq}" data-action="${esc(r.actionId)}" role="status">${r.verdict === 'correct' ? icon.check : icon.cross}<div class="grow"><b>${tr(('preflop3.verdict.' + r.verdict) as Key)}</b><div class="small">${esc(detail)}</div></div><button id="p3-next" class="primary">${tr('preflop3.next')} <kbd aria-hidden="true">&#x23CE;</kbd></button></div>${S.saveErr ? `<div class="err" id="p3-save-err">${tr('preflop3.saveErr')} ${esc(S.saveErr)}</div>` : ''}`;
+    const banner = `<div id="p3-verdict" class="verdict ${cls}" data-verdict="${r.verdict}" data-freq="${x.chosenFreq}" data-action="${esc(r.actionId)}" role="status">${r.verdict === 'correct' ? icon.check : icon.cross}<div class="grow"><b>${tr(('preflop3.verdict.' + r.verdict) as Key)}</b><div class="small">${esc(detail)}</div></div></div>${S.saveErr ? `<div class="err" id="p3-save-err">${tr('preflop3.saveErr')} ${esc(S.saveErr)}</div>` : ''}`;
     const colorOf = (id: string) => BUTTON_COLOR[byId.get(id)!.button];
     const bars = `<div class="panel"><div class="panel-title">${tr('preflop3.bars.title', { hand: x.handClass })}</div><div class="freqs" id="p3-bars" role="list" aria-label="${tr('preflop3.bars.aria')}">${x.freqs.map((f) => `<div class="fq${f.actionId === r.actionId ? ' chosen' : ''}" role="listitem" data-action="${esc(f.actionId)}" data-freq="${f.freq}" style="--c:${colorOf(f.actionId)}"><span>${esc(label(f.actionId))}</span><span class="bar"><i style="width:${f.freq * 100}%"></i></span><span class="v">${pct(f.freq)}</span></div>`).join('')}</div></div>`;
     const best = byId.get(x.bestActionId)!;
@@ -176,7 +176,8 @@ function draw(): void {
     const legend = h.node.actions.map((a) => `<span class="lg" style="--c:${colorOf(a.id)}"><i></i>${esc(label(a.id))}</span>`).join('');
     const grid = cells.map((cl) => `<div class="c${cl.mix ? '' : ' nr'}${cl.me ? ' me' : ''}" data-hand="${cl.name}"${cl.me ? ' aria-current="true"' : ''}${cl.mix ? ` style="background:${cellBackground(cl.mix, colors)}"` : ''}>${cl.name}</div>`).join('');
     const matrix = `<div class="panel"><div class="panel-title">${tr('preflop3.matrix.title')}</div><div class="legend">${legend}</div><div class="gridwrap"><div id="p3-grid" class="mgrid" role="group" aria-label="${tr('preflop3.matrix.aria')}">${grid}</div></div><div class="grid-hint">${tr('preflop3.matrix.hint')}</div></div>`;
-    return `${banner}<div class="p3-after">${bars}${expl}${matrix}</div>`;
+    const dock = `<div class="p3-dock"><button id="p3-next" class="primary">${tr('preflop3.next')} <kbd aria-hidden="true">&#x23CE;</kbd></button></div>`;
+    return `${banner}${dock}<div class="p3-after">${bars}${expl}${matrix}</div>`;
   }
 
   // --- scoreboard (fixed bar)
@@ -193,7 +194,13 @@ function draw(): void {
 
   // On phones the nav is a fixed bottom bar whose height depends on label wrapping: keep the score bar right above it.
   const navEl = document.querySelector<HTMLElement>('.side'), bar = document.getElementById('p3-score')!;
-  bar.style.bottom = navEl && getComputedStyle(navEl).position === 'fixed' ? `${navEl.getBoundingClientRect().height}px` : '';
+  const navH = navEl && getComputedStyle(navEl).position === 'fixed' ? navEl.getBoundingClientRect().height : 0;
+  bar.style.bottom = navH ? `${navH}px` : '';
+  // Phones: the action row is docked right above the score bar; reserve room so nothing hides behind the fixed bars.
+  const dockEl = el.querySelector<HTMLElement>('.p3-dock'), root = document.getElementById('p3-root')!;
+  const docked = !!dockEl && getComputedStyle(dockEl).position === 'fixed';
+  if (dockEl) dockEl.style.bottom = docked ? `${navH + bar.getBoundingClientRect().height}px` : '';
+  root.style.paddingBottom = navH ? `${navH + bar.getBoundingClientRect().height + (docked ? dockEl!.getBoundingClientRect().height : 0) + 12}px` : '';
 
   // --- wiring
   el.querySelectorAll<HTMLButtonElement>('[data-mode]').forEach((b) => b.onclick = () => { S.mode = b.dataset.mode as Mode; next(); });

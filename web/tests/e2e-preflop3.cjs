@@ -374,6 +374,60 @@ const score = async (page) => ({ c: await num(page, '#p3-correct'), i: await num
         await ctx.close();
       }
     }
+
+    // ---------- 9. docked action row: every action button inside the viewport, above the score bar and nav, no scrolling
+    for (const [w, h] of [[360, 640], [390, 844], [768, 1024]]) {
+      const ctx = await browser.newContext({ viewport: { width: w, height: h }, hasTouch: true, isMobile: true, deviceScaleFactor: 1 });
+      const page = await open(ctx, 'en', '#/preflop3', '9');
+      await page.waitForSelector('#p3-acts');
+      const check = async (phase, sel, label) => {
+        const m = await page.evaluate((sel) => {
+          const r = (e) => { const b = e.getBoundingClientRect(); return { t: b.top, b: b.bottom, l: b.left, r: b.right, h: b.height }; };
+          const q = (s) => document.querySelector(s);
+          const nav = q('.side'), sc = q('#p3-score');
+          return { btns: [...document.querySelectorAll(sel)].map(r), score: r(sc), nav: nav ? r(nav) : null, navFixed: !!nav && getComputedStyle(nav).position === 'fixed', sw: document.documentElement.scrollWidth, iw: innerWidth, ih: innerHeight, y: scrollY,
+            sit: r(q('#p3-situation')), cards: r(q('#p3-cards')), kbd: [...document.querySelectorAll('.p3-act kbd')].some((k) => getComputedStyle(k).display !== 'none') };
+        }, sel);
+        await page.screenshot({ path: `${out}/p3-dock-${w}x${h}-${phase}${label === 'five' ? '-five' : ''}.png` });
+        assert.strictEqual(m.y, 0, 'not scrolled');
+        assert(m.btns.length > 0, 'buttons present');
+        assert(m.sw <= m.iw, `${w}x${h} ${phase} horizontal overflow`);
+        for (const b of m.btns) {
+          assert(b.l >= 0 && b.r <= m.iw && b.t >= 0 && b.b <= m.ih, `${w}x${h} ${phase} ${label} button outside viewport ${JSON.stringify(b)}`);
+          assert(b.b <= m.score.t + 1, `${w}x${h} ${phase} ${label} button overlaps score bar`);
+          if (m.navFixed) assert(b.b <= m.nav.t + 1, `${w}x${h} ${phase} ${label} button overlaps nav`);
+          if (w <= 640) assert(b.h >= 48 - 0.5, `${w}x${h} ${phase} ${label} button height ${b.h}`);
+        }
+        if (w <= 640) {
+          assert(!m.kbd, 'keyboard hints hidden on touch');
+          assert(m.sit.t >= 0 && m.sit.b <= m.score.t && m.cards.b <= Math.min(...m.btns.map((b) => b.t)) + 1, `${w}x${h} ${phase} situation/cards remain visible above the dock`);
+        }
+      };
+      // the node with the most buttons in the fixture: step hands until one with max(actions) shows
+      const most = Math.max(...FIXTURE.nodes.map((n) => n.actions.length));
+      for (let k = 0; k < 300 && (await page.locator('.p3-act').count()) < most; k++) { await page.click('.p3-act'); await page.waitForSelector('#p3-next'); await page.click('#p3-next'); await page.waitForSelector('#p3-acts'); }
+      assert.strictEqual(await page.locator('.p3-act').count(), most);
+      await check('ask', '.p3-act', 'fixture');
+      await page.click('.p3-act'); await page.waitForSelector('#p3-verdict');
+      await check('result', '#p3-next', 'next');
+      await page.click('#p3-next'); await page.waitForSelector('#p3-acts');
+      // 5 buttons (FOLD, CALL, RAISE, 3-BET, ALL-IN): the fixture has none, so duplicate the real buttons in place to test the wrapping grid
+      await page.evaluate(() => { const a = document.getElementById('p3-acts'); const bs = [...a.children]; for (let i = bs.length; i < 5; i++) a.appendChild(bs[i % bs.length].cloneNode(true)); a.dataset.n = '5'; });
+      await check('ask', '.p3-act', 'five');
+      ok(`docked actions ${w}x${h}`);
+      await ctx.close();
+    }
+    // scroll the result page to the bottom: last content must clear the docked bars
+    {
+      const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+      const page = await open(ctx, 'en', '#/preflop3', '9');
+      await page.waitForSelector('#p3-acts'); await page.click('.p3-act'); await page.waitForSelector('#p3-verdict');
+      await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+      const clear = await page.evaluate(() => { const g = document.querySelector('.grid-hint').getBoundingClientRect(), d = document.querySelector('.p3-dock').getBoundingClientRect(); return g.bottom <= d.top + 1; });
+      assert(clear, 'content scrolls clear of the docked bars');
+      ok('docked bars reserve bottom padding');
+      await ctx.close();
+    }
     console.log('E2E PREFLOP3 OK');
   } finally { await browser.close(); e2e.srv.kill(); if (prod) prod.srv.kill(); }
 })().then(() => process.exit(0)).catch((e) => { console.error(e); process.exit(1); });
